@@ -1,0 +1,10 @@
+.git
+__pycache__
+*.pyc
+agent.json
+agent_state.json
+*.tmp
+.gitignore
+LICENSE
+README.md
+examples/

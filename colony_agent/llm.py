@@ -38,7 +38,19 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
         with urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode())
             return data["choices"][0]["message"]["content"].strip()
-    except (HTTPError, KeyError, IndexError, TimeoutError) as e:
+    except HTTPError as e:
+        import logging
+        logging.getLogger("colony-agent").warning(
+            f"LLM request failed ({e.code}): {e.read().decode()[:200]}"
+        )
+        return ""
+    except (KeyError, IndexError) as e:
+        import logging
+        logging.getLogger("colony-agent").warning(f"LLM returned unexpected response format: {e}")
+        return ""
+    except TimeoutError:
+        import logging
+        logging.getLogger("colony-agent").warning(f"LLM request timed out ({config.base_url})")
         return ""
 
 

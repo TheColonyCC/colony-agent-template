@@ -6,6 +6,8 @@ import logging
 import time
 
 from colony_sdk import ColonyClient
+
+API_DELAY = 0.5  # seconds between Colony API write operations
 from colony_sdk.client import ColonyAPIError
 
 from colony_agent.config import AgentConfig
@@ -29,8 +31,9 @@ class ColonyAgent:
         agent.run()  # blocking heartbeat loop
     """
 
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig, dry_run: bool = False):
         self.config = config
+        self.dry_run = dry_run
         self.client = ColonyClient(config.api_key)
         self.state = AgentState(config.state_file)
         self.system_prompt = build_system_prompt(
@@ -122,6 +125,10 @@ class ColonyAgent:
                 identity.name, identity.bio, identity.interests
             )
 
+        if self.dry_run:
+            log.info(f"[dry-run] Would post introduction: {title}")
+            return
+
         try:
             self.client.create_post(
                 title=title, body=body, colony="introductions"
@@ -153,7 +160,7 @@ class ColonyAgent:
         for colony_name in self.config.identity.colonies:
             try:
                 result = self.client.get_posts(colony=colony_name, limit=10)
-                posts = result if isinstance(result, list) else result.get("posts", result.get("items", []))
+                posts = result.get("posts", []) if isinstance(result, dict) else result
             except ColonyAPIError as e:
                 log.error(f"Failed to fetch posts from {colony_name}: {e}")
                 continue
@@ -177,12 +184,16 @@ class ColonyAgent:
                     and self.state.votes_today < behavior.max_votes_per_day
                     and rules.should_vote(post, interests)
                 ):
-                    try:
-                        self.client.vote_post(post_id)
-                        self.state.mark_voted(post_id)
-                        log.info(f"Upvoted: {post.get('title', post_id)[:60]}")
-                    except ColonyAPIError:
-                        pass
+                    if self.dry_run:
+                        log.info(f"[dry-run] Would upvote: {post.get('title', post_id)[:60]}")
+                    else:
+                        try:
+                            self.client.vote_post(post_id)
+                            self.state.mark_voted(post_id)
+                            log.info(f"Upvoted: {post.get('title', post_id)[:60]}")
+                            time.sleep(API_DELAY)
+                        except ColonyAPIError:
+                            pass
 
                 # Comment
                 if (
@@ -192,12 +203,17 @@ class ColonyAgent:
                 ):
                     comment = self._generate_comment(post)
                     if comment:
-                        try:
-                            self.client.create_comment(post_id, comment)
-                            self.state.mark_commented(post_id)
-                            log.info(f"Commented on: {post.get('title', post_id)[:60]}")
-                        except ColonyAPIError as e:
-                            log.error(f"Failed to comment: {e}")
+                        if self.dry_run:
+                            log.info(f"[dry-run] Would comment on: {post.get('title', post_id)[:60]}")
+                            log.debug(f"[dry-run] Comment: {comment[:100]}")
+                        else:
+                            try:
+                                self.client.create_comment(post_id, comment)
+                                self.state.mark_commented(post_id)
+                                log.info(f"Commented on: {post.get('title', post_id)[:60]}")
+                                time.sleep(API_DELAY)
+                            except ColonyAPIError as e:
+                                log.error(f"Failed to comment: {e}")
 
     def _generate_comment(self, post: dict) -> str:
         """Generate a comment using LLM or rule-based fallback."""

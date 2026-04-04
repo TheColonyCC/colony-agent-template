@@ -33,6 +33,7 @@ def main() -> None:
     run_p = sub.add_parser("run", help="Start the heartbeat loop")
     run_p.add_argument("--config", default=DEFAULT_CONFIG, help="Config file path")
     run_p.add_argument("--once", action="store_true", help="Run one heartbeat then exit")
+    run_p.add_argument("--dry-run", action="store_true", help="Browse and analyze only — no posts, comments, or votes")
     run_p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
 
     # status
@@ -140,7 +141,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             print(f"Config error: {e}")
         sys.exit(1)
 
-    agent = ColonyAgent(config)
+    agent = ColonyAgent(config, dry_run=getattr(args, 'dry_run', False))
     if args.once:
         agent.run_once()
     else:

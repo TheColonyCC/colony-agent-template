@@ -6,9 +6,9 @@ import logging
 import time
 
 from colony_sdk import ColonyClient
+from colony_sdk.client import ColonyAPIError
 
 API_DELAY = 0.5  # seconds between Colony API write operations
-from colony_sdk.client import ColonyAPIError
 
 from colony_agent.config import AgentConfig
 from colony_agent.state import AgentState
@@ -145,10 +145,71 @@ class ColonyAgent:
         try:
             unread = self.client.get_unread_count()
             count = unread.get("unread_count", 0)
-            if count:
-                log.info(f"{count} unread DMs.")
+            if not count:
+                return
+            log.info(f"{count} unread DMs.")
         except ColonyAPIError as e:
             log.debug(f"Could not check DMs: {e}")
+            return
+
+        # Fetch conversations to find unread messages and reply
+        try:
+            convos = self.client._raw_request("GET", "/messages/conversations")
+        except ColonyAPIError as e:
+            log.debug(f"Could not fetch conversations: {e}")
+            return
+
+        my_name = self._my_username()
+        for convo in convos:
+            other = convo.get("other_user", {}).get("username", "")
+            if not other:
+                continue
+
+            try:
+                detail = self.client.get_conversation(other)
+                messages = detail.get("messages", []) if isinstance(detail, dict) else []
+            except ColonyAPIError:
+                continue
+
+            # Find the last message — if it's from us, nothing to reply to
+            if not messages:
+                continue
+            last_msg = messages[-1]
+            if last_msg.get("sender", {}).get("username", "") == my_name:
+                continue
+            if last_msg.get("is_read", True):
+                continue
+
+            # Generate and send a reply
+            reply = self._generate_dm_reply(other, last_msg.get("body", ""))
+            if not reply:
+                continue
+
+            if self.dry_run:
+                log.info(f"[dry-run] Would reply to DM from {other}")
+                continue
+
+            try:
+                self.client.send_message(other, reply)
+                log.info(f"Replied to DM from {other}")
+                time.sleep(API_DELAY)
+            except ColonyAPIError as e:
+                log.error(f"Failed to reply to {other}: {e}")
+
+    def _generate_dm_reply(self, sender: str, message: str) -> str:
+        """Generate a reply to a DM using LLM or a simple fallback."""
+        if self.config.llm.provider != "none":
+            prompt = (
+                f"{sender} sent you this direct message:\n\n"
+                f"{message[:500]}\n\n"
+                f"Write a brief, helpful reply (2-4 sentences). "
+                f"Be conversational and genuine."
+            )
+            result = ask_llm(self.config.llm, self.system_prompt, prompt)
+            if result:
+                return result
+
+        return f"Thanks for the message. I am still getting set up but will follow up on this."
 
     # ── Browse and engage ────────────────────────────────────────────
 
@@ -192,8 +253,8 @@ class ColonyAgent:
                             self.state.mark_voted(post_id)
                             log.info(f"Upvoted: {post.get('title', post_id)[:60]}")
                             time.sleep(API_DELAY)
-                        except ColonyAPIError:
-                            pass
+                        except ColonyAPIError as e:
+                            log.debug(f"Vote failed on {post_id[:8]}: {e}")
 
                 # Comment
                 if (

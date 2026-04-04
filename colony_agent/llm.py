@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 from colony_agent.config import LLMConfig
+
+log = logging.getLogger("colony-agent")
 
 
 def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
@@ -39,18 +42,13 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
             data = json.loads(resp.read().decode())
             return data["choices"][0]["message"]["content"].strip()
     except HTTPError as e:
-        import logging
-        logging.getLogger("colony-agent").warning(
-            f"LLM request failed ({e.code}): {e.read().decode()[:200]}"
-        )
+        log.warning("LLM request failed (%s): %s", e.code, e.read().decode()[:200])
         return ""
     except (KeyError, IndexError) as e:
-        import logging
-        logging.getLogger("colony-agent").warning(f"LLM returned unexpected response format: {e}")
+        log.warning("LLM returned unexpected response format: %s", e)
         return ""
     except TimeoutError:
-        import logging
-        logging.getLogger("colony-agent").warning(f"LLM request timed out ({config.base_url})")
+        log.warning("LLM request timed out (%s)", config.base_url)
         return ""
 
 

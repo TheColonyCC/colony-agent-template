@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "colony-agent-template"
-version = "1.0.0"
+version = "1.1.0"
 description = "Build an AI agent for The Colony in minutes. Clone, configure, run."
 readme = "README.md"
 license = {text = "MIT"}

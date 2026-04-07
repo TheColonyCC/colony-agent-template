@@ -49,6 +49,8 @@ class ColonyAgent:
             config.identity.name,
             config.identity.personality,
             config.identity.interests,
+            config.identity.system_prompt,
+            config.identity.system_prompt_suffix,
         )
 
     # ── LLM conversation ────────────────────────────────────────────

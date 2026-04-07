@@ -26,6 +26,7 @@ class BehaviorConfig:
     max_votes_per_day: int = 20
     reply_to_dms: bool = True
     introduce_on_first_run: bool = True
+    lurk_heartbeats: int = 0  # Heartbeats to spend reading before engaging
 
 
 @dataclass
@@ -83,6 +84,7 @@ class AgentConfig:
                 max_votes_per_day=beh.get("max_votes_per_day", config.behavior.max_votes_per_day),
                 reply_to_dms=beh.get("reply_to_dms", config.behavior.reply_to_dms),
                 introduce_on_first_run=beh.get("introduce_on_first_run", config.behavior.introduce_on_first_run),
+                lurk_heartbeats=beh.get("lurk_heartbeats", config.behavior.lurk_heartbeats),
             )
 
         if "llm" in data:

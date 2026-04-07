@@ -30,6 +30,7 @@ class AgentState:
             "last_reset_date": "",
             "introduced": False,
             "last_heartbeat": 0,
+            "heartbeat_count": 0,
         }
         self._load()
 
@@ -92,6 +93,10 @@ class AgentState:
     def last_heartbeat(self) -> float:
         return self._data["last_heartbeat"]
 
+    @property
+    def heartbeat_count(self) -> int:
+        return self._data.get("heartbeat_count", 0)
+
     # ── Mutations ────────────────────────────────────────────────────
 
     def mark_seen(self, post_id: str) -> None:
@@ -119,6 +124,7 @@ class AgentState:
 
     def mark_heartbeat(self) -> None:
         self._data["last_heartbeat"] = time.time()
+        self._data["heartbeat_count"] = self._data.get("heartbeat_count", 0) + 1
 
     @property
     def total_tracked(self) -> int:

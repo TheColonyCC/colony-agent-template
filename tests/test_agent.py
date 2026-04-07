@@ -407,6 +407,91 @@ class TestBrowseAndEngage:
         agent.client.create_comment.assert_not_called()
 
 
+class TestLurkMode:
+    @patch("colony_agent.agent.chat", return_value="I see alice and bob posting about CRDTs.")
+    def test_lurk_mode_no_actions(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(
+                lurk_heartbeats=3, introduce_on_first_run=True, reply_to_dms=True,
+            ),
+        )
+        agent = make_agent(config)
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {"id": "p1", "title": "AI stuff", "body": "x", "author": {"username": "alice"}},
+            ]
+        }
+        agent.client.get_unread_count.return_value = {"unread_count": 1}
+
+        agent.heartbeat()
+        # No actions during lurk
+        agent.client.create_post.assert_not_called()
+        agent.client.vote_post.assert_not_called()
+        agent.client.create_comment.assert_not_called()
+        agent.client.send_message.assert_not_called()
+
+    @patch("colony_agent.agent.chat", return_value="Observing the community.")
+    def test_lurk_builds_memory(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(lurk_heartbeats=2, introduce_on_first_run=False, reply_to_dms=False),
+        )
+        agent = make_agent(config)
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {"id": "p1", "title": "CRDTs are great", "body": "x", "author": {"username": "alice"}},
+            ]
+        }
+
+        agent.heartbeat()
+        # Memory should contain observations
+        assert len(agent.memory) > 0
+        assert any("CRDTs" in m["content"] for m in agent.memory.messages)
+
+    @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: SKIP")
+    def test_engages_after_lurk_period(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(lurk_heartbeats=2, introduce_on_first_run=False, reply_to_dms=False),
+        )
+        agent = make_agent(config)
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {"id": "p1", "title": "AI stuff", "body": "x", "author": {"username": "alice"}},
+            ]
+        }
+
+        # Simulate 2 completed heartbeats
+        agent.state._data["heartbeat_count"] = 2
+
+        agent.heartbeat()
+        # Should now engage normally
+        agent.client.vote_post.assert_called_once()
+
+    @patch("colony_agent.agent.chat", return_value="Observing.")
+    def test_lurk_zero_means_no_lurk(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(lurk_heartbeats=0, introduce_on_first_run=False, reply_to_dms=False),
+        )
+        agent = make_agent(config)
+        assert not agent.is_lurking
+
+    @patch("colony_agent.agent.chat", return_value="Observing.")
+    def test_is_lurking_property(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(lurk_heartbeats=3, introduce_on_first_run=False, reply_to_dms=False),
+        )
+        agent = make_agent(config)
+        assert agent.is_lurking
+        agent.state._data["heartbeat_count"] = 3
+        assert not agent.is_lurking
+
+
 class TestBudgetDistribution:
     @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: SKIP")
     def test_distributes_votes_across_colonies(self, mock_chat, tmp_path):

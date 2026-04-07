@@ -109,6 +109,7 @@ class ColonyAgent:
     def heartbeat(self) -> None:
         """Run one heartbeat cycle: introduce, check DMs, browse, engage."""
         log.info("Heartbeat starting.")
+        self._dry_run_actions: list[tuple[str, str, str]] = []
 
         # First run: introduce yourself
         if self.config.behavior.introduce_on_first_run and not self.state.introduced:
@@ -129,6 +130,10 @@ class ColonyAgent:
         # Trim memory if needed
         if self.memory.needs_trim():
             self._trim_memory()
+
+        # Print dry-run summary
+        if self.dry_run and self._dry_run_actions:
+            self._print_dry_run_summary()
 
     def run_once(self) -> None:
         """Run a single heartbeat, then exit. Useful for cron jobs."""
@@ -163,7 +168,7 @@ class ColonyAgent:
             return
 
         if self.dry_run:
-            log.info(f"[dry-run] Would post introduction: {title}")
+            self._dry_run_actions.append(("introduce", title, body[:200]))
             return
 
         result = retry_api_call(
@@ -230,7 +235,7 @@ class ColonyAgent:
                 continue
 
             if self.dry_run:
-                log.info(f"[dry-run] Would reply to DM from {other}")
+                self._dry_run_actions.append(("dm_reply", f"to {other}", reply[:200]))
                 continue
 
             result = retry_api_call(self.client.send_message, other, reply)
@@ -335,9 +340,7 @@ class ColonyAgent:
                     if vote_value != 0:
                         direction = "upvote" if vote_value == 1 else "downvote"
                         if self.dry_run:
-                            log.info(
-                                f"[dry-run] Would {direction}: {title[:60]}"
-                            )
+                            self._dry_run_actions.append((direction, title[:60], ""))
                         else:
                             vote_result = retry_api_call(
                                 self.client.vote_post, post_id, vote_value
@@ -352,9 +355,7 @@ class ColonyAgent:
                     comment = self._extract_comment(response)
                     if comment:
                         if self.dry_run:
-                            log.info(
-                                f"[dry-run] Would comment on: {title[:60]}"
-                            )
+                            self._dry_run_actions.append(("comment", title[:60], comment[:200]))
                         else:
                             comment_result = retry_api_call(
                                 self.client.create_comment, post_id, comment
@@ -414,7 +415,7 @@ class ColonyAgent:
                 continue
 
             if self.dry_run:
-                log.info(f"[dry-run] Would reply to {c_author} on '{title[:40]}'")
+                self._dry_run_actions.append(("reply", f"{c_author} on '{title[:40]}'", reply[:200]))
                 continue
 
             comment_result = retry_api_call(
@@ -528,6 +529,55 @@ class ColonyAgent:
             keep = self.memory.max_messages // 2
             self.memory._messages = self.memory._messages[-keep:]
             log.warning("LLM failed to summarize — kept recent messages only.")
+
+    # ── Dry-run summary ────────────────────────────────────────────
+
+    def _print_dry_run_summary(self) -> None:
+        """Print a formatted summary of what the agent would have done."""
+        actions = self._dry_run_actions
+        counts: dict[str, int] = {}
+        for action_type, _, _ in actions:
+            counts[action_type] = counts.get(action_type, 0) + 1
+
+        print("\n" + "=" * 60)
+        print("  DRY RUN SUMMARY")
+        print("=" * 60)
+
+        # Counts line
+        parts = []
+        for label, key in [
+            ("upvote", "upvote"),
+            ("downvote", "downvote"),
+            ("comment", "comment"),
+            ("reply", "reply"),
+            ("DM reply", "dm_reply"),
+            ("introduction", "introduce"),
+        ]:
+            count = counts.get(key, 0)
+            if count:
+                parts.append(f"{count} {label}{'s' if count != 1 else ''}")
+        if parts:
+            print(f"\n  Would take {len(actions)} actions: {', '.join(parts)}")
+        print()
+
+        # Detailed actions
+        for action_type, target, content in actions:
+            icon = {
+                "upvote": "+",
+                "downvote": "-",
+                "comment": "#",
+                "reply": ">",
+                "dm_reply": "@",
+                "introduce": "*",
+            }.get(action_type, "?")
+
+            print(f"  {icon} {action_type.upper()}: {target}")
+            if content:
+                # Indent content, wrap long lines
+                for line in content.split("\n")[:3]:
+                    print(f"    {line[:100]}")
+
+        print("\n" + "=" * 60 + "\n")
 
     # ── Helpers ──────────────────────────────────────────────────────
 

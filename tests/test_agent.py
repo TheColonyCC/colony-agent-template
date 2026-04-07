@@ -390,6 +390,106 @@ class TestBrowseAndEngage:
         agent.client.create_comment.assert_not_called()
 
 
+class TestDryRunSummary:
+    @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: Great insight.")
+    def test_prints_summary(self, mock_chat, tmp_path, capsys):
+        config = make_config(tmp_path)
+        agent = make_agent(config)
+        agent.dry_run = True
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "AI research update",
+                    "body": "New findings.", "author": {"username": "alice"},
+                },
+                {
+                    "id": "p2", "title": "Spam post",
+                    "body": "Buy now.", "author": {"username": "bob"},
+                },
+            ]
+        }
+        agent.heartbeat()
+        output = capsys.readouterr().out
+        assert "DRY RUN SUMMARY" in output
+        assert "upvote" in output.lower()
+        assert "comment" in output.lower()
+
+    @patch("colony_agent.agent.chat", return_value="SKIP")
+    def test_no_summary_when_no_actions(self, mock_chat, tmp_path, capsys):
+        config = make_config(tmp_path)
+        agent = make_agent(config)
+        agent.dry_run = True
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Meh",
+                    "body": "Nothing.", "author": {"username": "alice"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        output = capsys.readouterr().out
+        assert "DRY RUN SUMMARY" not in output
+
+    @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: Interesting work.")
+    def test_summary_shows_content(self, mock_chat, tmp_path, capsys):
+        config = make_config(tmp_path)
+        agent = make_agent(config)
+        agent.dry_run = True
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Distributed systems paper",
+                    "body": "Analysis.", "author": {"username": "alice"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        output = capsys.readouterr().out
+        assert "Interesting work" in output
+        assert "Distributed systems" in output
+
+    @patch("colony_agent.agent.chat", return_value="Hello, I am TestBot!")
+    def test_summary_includes_introduction(self, mock_chat, tmp_path, capsys):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(introduce_on_first_run=True, reply_to_dms=False),
+        )
+        agent = make_agent(config)
+        agent.dry_run = True
+        agent.client.get_posts.return_value = {"posts": []}
+        agent.heartbeat()
+        output = capsys.readouterr().out
+        assert "INTRODUCE" in output
+
+    @patch("colony_agent.agent.chat", return_value="Hey alice, good question!")
+    def test_summary_includes_dm_reply(self, mock_chat, tmp_path, capsys):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(reply_to_dms=True, introduce_on_first_run=False),
+        )
+        agent = make_agent(config)
+        agent.dry_run = True
+        agent.client.get_unread_count.return_value = {"unread_count": 1}
+        agent.client._raw_request.return_value = [
+            {"other_user": {"username": "alice"}}
+        ]
+        agent.client.get_conversation.return_value = {
+            "messages": [
+                {"sender": {"username": "alice"}, "body": "Hello!", "is_read": False}
+            ]
+        }
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {"posts": []}
+        agent.heartbeat()
+        output = capsys.readouterr().out
+        assert "DM_REPLY" in output
+        assert "alice" in output
+
+
 class TestRepliestoOwnPosts:
     @patch("colony_agent.agent.chat", return_value="Thanks for the feedback, alice!")
     def test_replies_to_comment_on_own_post(self, mock_chat, agent):

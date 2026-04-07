@@ -17,6 +17,7 @@ class AgentState:
             "seen_posts": {},       # post_id -> timestamp
             "commented_on": {},     # post_id -> timestamp
             "voted_on": {},         # post_id -> timestamp
+            "replied_comments": {}, # comment_id -> timestamp
             "posts_today": 0,
             "comments_today": 0,
             "votes_today": 0,
@@ -58,6 +59,9 @@ class AgentState:
     def has_voted_on(self, post_id: str) -> bool:
         return post_id in self._data["voted_on"]
 
+    def has_replied_to_comment(self, comment_id: str) -> bool:
+        return comment_id in self._data.get("replied_comments", {})
+
     @property
     def introduced(self) -> bool:
         return self._data["introduced"]
@@ -94,6 +98,12 @@ class AgentState:
         self._data["voted_on"][post_id] = time.time()
         self._data["votes_today"] += 1
 
+    def mark_replied_to_comment(self, comment_id: str) -> None:
+        if "replied_comments" not in self._data:
+            self._data["replied_comments"] = {}
+        self._data["replied_comments"][comment_id] = time.time()
+        self._data["comments_today"] += 1
+
     def mark_posted(self) -> None:
         self._data["posts_today"] += 1
 
@@ -109,7 +119,7 @@ class AgentState:
         """Remove entries older than max_age_days. Returns count removed."""
         cutoff = time.time() - (max_age_days * 86400)
         removed = 0
-        for key in ("seen_posts", "commented_on", "voted_on"):
+        for key in ("seen_posts", "commented_on", "voted_on", "replied_comments"):
             before = len(self._data[key])
             self._data[key] = {
                 k: v for k, v in self._data[key].items() if v > cutoff

@@ -390,6 +390,150 @@ class TestBrowseAndEngage:
         agent.client.create_comment.assert_not_called()
 
 
+class TestRepliestoOwnPosts:
+    @patch("colony_agent.agent.chat", return_value="Thanks for the feedback, alice!")
+    def test_replies_to_comment_on_own_post(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "My thoughts on AI",
+                    "body": "Here is what I think.", "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {
+                    "id": "c1", "body": "Great post!",
+                    "author": {"username": "alice"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.create_comment.assert_called_once()
+
+    @patch("colony_agent.agent.chat", return_value="Thanks!")
+    def test_skips_own_comments(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "My post",
+                    "body": "Content.", "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {
+                    "id": "c1", "body": "My own follow-up",
+                    "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.create_comment.assert_not_called()
+
+    @patch("colony_agent.agent.chat", return_value="Thanks!")
+    def test_does_not_reply_twice(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.state.mark_replied_to_comment("c1")
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "My post",
+                    "body": "Content.", "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {
+                    "id": "c1", "body": "Already replied to this",
+                    "author": {"username": "alice"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.create_comment.assert_not_called()
+
+    @patch("colony_agent.agent.chat", return_value="SKIP")
+    def test_skip_reply_still_marks_as_handled(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "My post",
+                    "body": "Content.", "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {
+                    "id": "c1", "body": "Meh",
+                    "author": {"username": "alice"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.create_comment.assert_not_called()
+        assert agent.state.has_replied_to_comment("c1")
+
+    @patch("colony_agent.agent.chat", return_value="Thanks!")
+    def test_respects_comment_limit(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(
+                max_comments_per_day=1, introduce_on_first_run=False,
+                reply_to_dms=False,
+            ),
+        )
+        agent = make_agent(config)
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "My post",
+                    "body": "Content.", "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {"id": "c1", "body": "Comment 1", "author": {"username": "alice"}},
+                {"id": "c2", "body": "Comment 2", "author": {"username": "bob"}},
+            ]
+        }
+        agent.heartbeat()
+        assert agent.client.create_comment.call_count == 1
+
+    @patch("colony_agent.agent.chat", return_value="Good point alice!")
+    def test_reply_includes_thread_context(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "My AI post",
+                    "body": "Thoughts.", "author": {"username": "testbot"},
+                }
+            ]
+        }
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {"id": "c1", "body": "I disagree", "author": {"username": "alice"}},
+                {"id": "c2", "body": "I agree with alice", "author": {"username": "bob"}},
+            ]
+        }
+        agent.heartbeat()
+        # The prompt for the first comment should include thread context
+        call_messages = mock_chat.call_args_list[0][0][1]
+        last_user_msg = [m for m in call_messages if m["role"] == "user"][-1]
+        assert "alice" in last_user_msg["content"]
+        assert "bob" in last_user_msg["content"]
+
+
 class TestCheckDMs:
     @patch("colony_agent.agent.chat", return_value="SKIP")
     def test_skips_when_no_unread(self, mock_chat, tmp_path):

@@ -12,11 +12,11 @@ from colony_agent.config import LLMConfig
 log = logging.getLogger("colony-agent")
 
 
-def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
-    """Send a chat completion request to an OpenAI-compatible API.
+def chat(config: LLMConfig, messages: list[dict[str, str]]) -> str:
+    """Send a chat completion with a full message history.
 
-    Works with: OpenAI, Anthropic (via proxy), Ollama, vLLM, LM Studio,
-    Together, Groq, or any provider that speaks the OpenAI chat format.
+    This is the core LLM call. It accepts an arbitrary message list
+    (system, user, assistant, etc.) and returns the assistant's response.
     """
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     headers = {"Content-Type": "application/json"}
@@ -25,10 +25,7 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
 
     payload = json.dumps({
         "model": config.model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": messages,
         "max_tokens": config.max_tokens,
         "temperature": config.temperature,
     }).encode()
@@ -47,6 +44,14 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
     except (URLError, TimeoutError, OSError) as e:
         log.warning("LLM connection error (%s): %s", config.base_url, e)
         return ""
+
+
+def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
+    """Convenience wrapper: single system + user prompt, returns response."""
+    return chat(config, [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ])
 
 
 def build_system_prompt(name: str, personality: str, interests: list[str]) -> str:

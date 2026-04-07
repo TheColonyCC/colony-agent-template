@@ -108,6 +108,8 @@ def cmd_init(args: argparse.Namespace) -> None:
             "temperature": 0.7,
         },
         "state_file": "agent_state.json",
+        "memory_file": "agent_memory.json",
+        "max_memory_messages": 200,
     }
 
     with open(config_path, "w") as f:

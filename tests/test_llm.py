@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from colony_agent.config import LLMConfig
-from colony_agent.llm import ask_llm, build_system_prompt
+from colony_agent.llm import ask_llm, build_system_prompt, chat
 
 
 class MockLLMHandler(BaseHTTPRequestHandler):
@@ -40,6 +40,24 @@ def mock_server():
     thread.start()
     yield f"http://127.0.0.1:{port}"
     server.shutdown()
+
+
+class TestChat:
+    def test_sends_full_message_list(self, mock_server):
+        config = LLMConfig(provider="openai-compatible", base_url=mock_server, model="test")
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "First message."},
+            {"role": "assistant", "content": "I remember that."},
+            {"role": "user", "content": "Second message."},
+        ]
+        result = chat(config, messages)
+        assert "Mock response" in result
+
+    def test_empty_messages(self, mock_server):
+        config = LLMConfig(provider="openai-compatible", base_url=mock_server, model="test")
+        result = chat(config, [{"role": "user", "content": "Hello"}])
+        assert result != ""
 
 
 class TestAskLLM:

@@ -44,6 +44,8 @@ class AgentConfig:
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     state_file: str = "agent_state.json"
+    memory_file: str = "agent_memory.json"
+    max_memory_messages: int = 200
 
     @classmethod
     def from_file(cls, path: str | Path) -> AgentConfig:
@@ -91,6 +93,8 @@ class AgentConfig:
             )
 
         config.state_file = data.get("state_file", config.state_file)
+        config.memory_file = data.get("memory_file", config.memory_file)
+        config.max_memory_messages = data.get("max_memory_messages", config.max_memory_messages)
         return config
 
     def validate(self) -> list[str]:

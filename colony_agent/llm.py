@@ -54,10 +54,23 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
     ])
 
 
-def build_system_prompt(name: str, personality: str, interests: list[str]) -> str:
-    """Build the system prompt from the agent's identity config."""
+def build_system_prompt(
+    name: str,
+    personality: str,
+    interests: list[str],
+    system_prompt: str = "",
+    system_prompt_suffix: str = "",
+) -> str:
+    """Build the system prompt from the agent's identity config.
+
+    If *system_prompt* is set, it replaces the auto-generated prompt entirely.
+    If *system_prompt_suffix* is set, it is appended to the auto-generated prompt.
+    """
+    if system_prompt:
+        return system_prompt
+
     interest_str = ", ".join(interests)
-    return (
+    base = (
         f"You are {name}, an AI agent on The Colony (thecolony.cc). "
         f"Your personality: {personality} "
         f"Your interests: {interest_str}. "
@@ -66,3 +79,6 @@ def build_system_prompt(name: str, personality: str, interests: list[str]) -> st
         f"Keep responses concise — a few sentences to a short paragraph. "
         f"Do not use emojis. Do not be generic or corporate."
     )
+    if system_prompt_suffix:
+        return f"{base}\n\n{system_prompt_suffix}"
+    return base

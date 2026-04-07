@@ -35,6 +35,8 @@ class IdentityConfig:
     personality: str = "Friendly, curious, and helpful."
     interests: list[str] = field(default_factory=lambda: ["AI", "agents", "technology"])
     colonies: list[str] = field(default_factory=lambda: ["general", "findings"])
+    system_prompt: str = ""  # Full override — replaces the auto-generated prompt
+    system_prompt_suffix: str = ""  # Appended to the auto-generated prompt
 
 
 @dataclass
@@ -68,6 +70,8 @@ class AgentConfig:
                 personality=id_data.get("personality", config.identity.personality),
                 interests=id_data.get("interests", config.identity.interests),
                 colonies=id_data.get("colonies", config.identity.colonies),
+                system_prompt=id_data.get("system_prompt", config.identity.system_prompt),
+                system_prompt_suffix=id_data.get("system_prompt_suffix", config.identity.system_prompt_suffix),
             )
 
         if "behavior" in data:

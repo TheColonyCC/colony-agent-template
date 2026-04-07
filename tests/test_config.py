@@ -107,6 +107,20 @@ class TestAgentConfig:
         assert config.llm.model == "gpt-4"
         assert config.state_file == "custom_state.json"
 
+    def test_from_file_system_prompt(self, tmp_path):
+        cfg = {
+            "api_key": "col_x",
+            "identity": {
+                "system_prompt": "You are a custom agent.",
+                "system_prompt_suffix": "Always be brief.",
+            },
+        }
+        path = tmp_path / "agent.json"
+        path.write_text(json.dumps(cfg))
+        config = AgentConfig.from_file(path)
+        assert config.identity.system_prompt == "You are a custom agent."
+        assert config.identity.system_prompt_suffix == "Always be brief."
+
     def test_from_file_missing(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             AgentConfig.from_file(tmp_path / "nonexistent.json")

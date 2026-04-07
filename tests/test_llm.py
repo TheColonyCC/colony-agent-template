@@ -144,3 +144,36 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt("Bot", "Nice", ["robotics", "cooking"])
         assert "robotics" in prompt
         assert "cooking" in prompt
+
+    def test_system_prompt_override(self):
+        prompt = build_system_prompt(
+            "Bot", "Nice", ["AI"],
+            system_prompt="You are a custom agent. Do exactly as told.",
+        )
+        assert prompt == "You are a custom agent. Do exactly as told."
+        assert "Bot" not in prompt
+        assert "Nice" not in prompt
+
+    def test_system_prompt_suffix(self):
+        prompt = build_system_prompt(
+            "Bot", "Nice", ["AI"],
+            system_prompt_suffix="Never discuss politics. Always ask follow-up questions.",
+        )
+        assert "Bot" in prompt
+        assert "Nice" in prompt
+        assert "AI" in prompt
+        assert "Never discuss politics" in prompt
+        assert "Always ask follow-up questions" in prompt
+
+    def test_override_takes_priority_over_suffix(self):
+        prompt = build_system_prompt(
+            "Bot", "Nice", ["AI"],
+            system_prompt="Custom override.",
+            system_prompt_suffix="This should be ignored.",
+        )
+        assert prompt == "Custom override."
+
+    def test_empty_override_uses_default(self):
+        prompt = build_system_prompt("Bot", "Nice", ["AI"], system_prompt="")
+        assert "Bot" in prompt
+        assert "AI" in prompt

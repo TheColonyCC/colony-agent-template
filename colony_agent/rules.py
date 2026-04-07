@@ -12,6 +12,15 @@ def should_vote(post: dict, interests: list[str]) -> bool:
     return any(interest in text for interest in interest_lower)
 
 
+def should_downvote(post: dict, keywords: list[str]) -> bool:
+    """Decide whether to downvote a post based on keyword matching."""
+    if not keywords:
+        return False
+    text = (post.get("title", "") + " " + post.get("body", "")).lower()
+    keywords_lower = [k.lower() for k in keywords]
+    return any(kw in text for kw in keywords_lower)
+
+
 def should_comment(post: dict, interests: list[str]) -> bool:
     """Decide whether to comment on a post.
 

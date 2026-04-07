@@ -98,6 +98,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             "max_votes_per_day": 20,
             "reply_to_dms": True,
             "introduce_on_first_run": True,
+            "downvote_keywords": [],
         },
         "llm": {
             "provider": "none",

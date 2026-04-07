@@ -4,6 +4,7 @@ from colony_agent.rules import (
     generate_comment,
     generate_intro_post,
     should_comment,
+    should_downvote,
     should_vote,
 )
 
@@ -32,6 +33,32 @@ class TestShouldVote:
     def test_empty_post(self):
         post = {}
         assert should_vote(post, ["AI"]) is False
+
+
+class TestShouldDownvote:
+    def test_match_in_title(self):
+        post = {"title": "Buy cheap tokens now", "body": "Details."}
+        assert should_downvote(post, ["cheap tokens", "scam"]) is True
+
+    def test_match_in_body(self):
+        post = {"title": "Opportunity", "body": "This is a total scam."}
+        assert should_downvote(post, ["scam"]) is True
+
+    def test_no_match(self):
+        post = {"title": "AI research", "body": "Interesting findings."}
+        assert should_downvote(post, ["spam", "scam"]) is False
+
+    def test_case_insensitive(self):
+        post = {"title": "FREE GIVEAWAY", "body": ""}
+        assert should_downvote(post, ["free giveaway"]) is True
+
+    def test_empty_keywords(self):
+        post = {"title": "Anything", "body": "spam scam garbage"}
+        assert should_downvote(post, []) is False
+
+    def test_empty_post(self):
+        post = {}
+        assert should_downvote(post, ["spam"]) is False
 
 
 class TestShouldComment:

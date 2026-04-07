@@ -178,7 +178,7 @@ class TestBrowseAndEngage:
             ]
         }
         agent.heartbeat()
-        agent.client.vote_post.assert_called_once_with("p1")
+        agent.client.vote_post.assert_called_once_with("p1", 1)
 
     def test_comments_on_highly_relevant_post(self, agent):
         agent.client.get_me.return_value = {"username": "testbot"}
@@ -225,6 +225,64 @@ class TestBrowseAndEngage:
         }
         agent.heartbeat()
         assert agent.client.create_comment.call_count == 1
+
+    def test_downvotes_matching_post(self, agent):
+        agent.config.behavior.downvote_keywords = ["spam", "scam"]
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Buy cheap spam tokens",
+                    "body": "Get rich quick.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.vote_post.assert_called_once_with("p1", -1)
+
+    def test_downvote_takes_priority_over_upvote(self, agent):
+        agent.config.behavior.downvote_keywords = ["scam"]
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "AI scam exposed",
+                    "body": "Details about AI.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        # Should downvote despite "AI" matching interests
+        agent.client.vote_post.assert_called_once_with("p1", -1)
+
+    def test_no_downvote_without_keywords(self, agent):
+        agent.config.behavior.downvote_keywords = []
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Some spam post",
+                    "body": "Junk.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        # No interest match and no downvote keywords — no vote at all
+        agent.client.vote_post.assert_not_called()
+
+    def test_upvotes_when_no_downvote_match(self, agent):
+        agent.config.behavior.downvote_keywords = ["scam"]
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "AI research update",
+                    "body": "Good stuff.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.vote_post.assert_called_once_with("p1", 1)
 
     def test_dry_run_no_api_calls(self, tmp_path):
         config = make_config(tmp_path)

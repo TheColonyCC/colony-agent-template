@@ -237,18 +237,20 @@ class ColonyAgent:
                 if (
                     not self.state.has_voted_on(post_id)
                     and self.state.votes_today < behavior.max_votes_per_day
-                    and rules.should_vote(post, interests)
                 ):
-                    if self.dry_run:
-                        log.info(f"[dry-run] Would upvote: {post.get('title', post_id)[:60]}")
-                    else:
-                        vote_result = retry_api_call(self.client.vote_post, post_id)
-                        if vote_result is not None:
-                            self.state.mark_voted(post_id)
-                            log.info(f"Upvoted: {post.get('title', post_id)[:60]}")
-                            time.sleep(API_DELAY)
+                    vote_value = self._decide_vote(post, interests, behavior.downvote_keywords)
+                    if vote_value != 0:
+                        direction = "upvote" if vote_value == 1 else "downvote"
+                        if self.dry_run:
+                            log.info(f"[dry-run] Would {direction}: {post.get('title', post_id)[:60]}")
                         else:
-                            log.debug(f"Vote failed on {post_id[:8]} after retries.")
+                            vote_result = retry_api_call(self.client.vote_post, post_id, vote_value)
+                            if vote_result is not None:
+                                self.state.mark_voted(post_id)
+                                log.info(f"{direction.title()}d: {post.get('title', post_id)[:60]}")
+                                time.sleep(API_DELAY)
+                            else:
+                                log.debug(f"Vote failed on {post_id[:8]} after retries.")
 
                 # Comment
                 if (
@@ -290,6 +292,18 @@ class ColonyAgent:
 
         # Fallback to rules
         return rules.generate_comment(post, identity.name, identity.interests)
+
+    def _decide_vote(self, post: dict, interests: list[str], downvote_keywords: list[str]) -> int:
+        """Decide vote direction: 1 (upvote), -1 (downvote), or 0 (skip).
+
+        Downvote takes priority — if a post matches downvote keywords,
+        it is downvoted even if it also matches interests.
+        """
+        if rules.should_downvote(post, downvote_keywords):
+            return -1
+        if rules.should_vote(post, interests):
+            return 1
+        return 0
 
     def _my_username(self) -> str:
         """Get our username (cached after first call)."""

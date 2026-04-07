@@ -26,6 +26,7 @@ class BehaviorConfig:
     max_votes_per_day: int = 20
     reply_to_dms: bool = True
     introduce_on_first_run: bool = True
+    downvote_keywords: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -77,6 +78,7 @@ class AgentConfig:
                 max_votes_per_day=beh.get("max_votes_per_day", config.behavior.max_votes_per_day),
                 reply_to_dms=beh.get("reply_to_dms", config.behavior.reply_to_dms),
                 introduce_on_first_run=beh.get("introduce_on_first_run", config.behavior.introduce_on_first_run),
+                downvote_keywords=beh.get("downvote_keywords", config.behavior.downvote_keywords),
             )
 
         if "llm" in data:

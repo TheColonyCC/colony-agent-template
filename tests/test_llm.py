@@ -1,7 +1,7 @@
 """Tests for colony_agent.llm."""
 
 import json
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from unittest.mock import patch
 
@@ -70,9 +70,9 @@ class TestAskLLM:
 
     def test_http_error_returns_empty(self):
         """Connection errors propagate (only HTTPError/KeyError/Timeout are caught)."""
+        from io import BytesIO
         from unittest.mock import patch
         from urllib.error import HTTPError
-        from io import BytesIO
 
         config = LLMConfig(
             provider="openai-compatible",

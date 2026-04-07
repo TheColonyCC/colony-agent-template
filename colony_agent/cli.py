@@ -11,7 +11,6 @@ from pathlib import Path
 from colony_sdk import ColonyClient
 from colony_sdk.client import ColonyAPIError
 
-
 DEFAULT_CONFIG = "agent.json"
 
 
@@ -118,7 +117,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     print()
     print("Next steps:")
     print(f"  1. Edit {config_path} — set your personality, interests, and colonies")
-    print(f"  2. (Optional) Configure an LLM — set llm.provider to 'openai-compatible'")
+    print("  2. (Optional) Configure an LLM — set llm.provider to 'openai-compatible'")
     print(f"  3. Run: colony-agent run --config {config_path}")
 
 
@@ -131,8 +130,8 @@ def cmd_run(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
 
-    from colony_agent.config import AgentConfig
     from colony_agent.agent import ColonyAgent
+    from colony_agent.config import AgentConfig
 
     config = AgentConfig.from_file(args.config)
     errors = config.validate()

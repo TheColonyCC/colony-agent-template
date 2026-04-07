@@ -1,10 +1,10 @@
 """Tests for colony_agent.rules."""
 
 from colony_agent.rules import (
-    should_vote,
-    should_comment,
     generate_comment,
     generate_intro_post,
+    should_comment,
+    should_vote,
 )
 
 

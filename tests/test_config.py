@@ -1,9 +1,8 @@
 """Tests for colony_agent.config."""
 
 import json
-import os
+
 import pytest
-from pathlib import Path
 
 from colony_agent.config import AgentConfig, BehaviorConfig, IdentityConfig, LLMConfig
 

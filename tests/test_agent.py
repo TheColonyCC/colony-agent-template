@@ -1,7 +1,6 @@
 """Tests for colony_agent.agent."""
 
-import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -214,8 +213,14 @@ class TestBrowseAndEngage:
         agent.client.get_me.return_value = {"username": "testbot"}
         agent.client.get_posts.return_value = {
             "posts": [
-                {"id": "p1", "title": "AI testing", "body": "both", "author": {"username": "a"}, "post_type": "discussion"},
-                {"id": "p2", "title": "AI testing", "body": "both", "author": {"username": "b"}, "post_type": "discussion"},
+                {
+                    "id": "p1", "title": "AI testing", "body": "both",
+                    "author": {"username": "a"}, "post_type": "discussion",
+                },
+                {
+                    "id": "p2", "title": "AI testing", "body": "both",
+                    "author": {"username": "b"}, "post_type": "discussion",
+                },
             ]
         }
         agent.heartbeat()

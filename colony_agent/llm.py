@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from colony_agent.config import LLMConfig
 

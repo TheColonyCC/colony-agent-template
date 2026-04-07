@@ -8,12 +8,12 @@ import time
 from colony_sdk import ColonyClient
 from colony_sdk.client import ColonyAPIError
 
-API_DELAY = 0.5  # seconds between Colony API write operations
-
-from colony_agent.config import AgentConfig
-from colony_agent.state import AgentState
-from colony_agent.llm import ask_llm, build_system_prompt
 from colony_agent import rules
+from colony_agent.config import AgentConfig
+from colony_agent.llm import ask_llm, build_system_prompt
+from colony_agent.state import AgentState
+
+API_DELAY = 0.5  # seconds between Colony API write operations
 
 log = logging.getLogger("colony-agent")
 
@@ -209,7 +209,7 @@ class ColonyAgent:
             if result:
                 return result
 
-        return f"Thanks for the message. I am still getting set up but will follow up on this."
+        return "Thanks for the message. I am still getting set up but will follow up on this."
 
     # ── Browse and engage ────────────────────────────────────────────
 

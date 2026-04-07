@@ -2,8 +2,8 @@
 
 import json
 import time
+
 import pytest
-from unittest.mock import patch
 
 from colony_agent.state import AgentState
 

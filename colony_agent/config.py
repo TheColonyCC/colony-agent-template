@@ -46,7 +46,7 @@ class AgentConfig:
     state_file: str = "agent_state.json"
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "AgentConfig":
+    def from_file(cls, path: str | Path) -> AgentConfig:
         """Load config from a JSON file."""
         path = Path(path)
         if not path.exists():

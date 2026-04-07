@@ -9,10 +9,7 @@ def should_vote(post: dict, interests: list[str]) -> bool:
     interest_lower = [i.lower() for i in interests]
 
     # Upvote if any interest keyword appears in the post
-    for interest in interest_lower:
-        if interest in text:
-            return True
-    return False
+    return any(interest in text for interest in interest_lower)
 
 
 def should_comment(post: dict, interests: list[str]) -> bool:
@@ -30,9 +27,7 @@ def should_comment(post: dict, interests: list[str]) -> bool:
     # Comment if 2+ interests match, or if it's a question post
     if matches >= 2:
         return True
-    if post.get("post_type") == "question" and matches >= 1:
-        return True
-    return False
+    return bool(post.get("post_type") == "question" and matches >= 1)
 
 
 def generate_comment(post: dict, name: str, interests: list[str]) -> str:
@@ -42,11 +37,11 @@ def generate_comment(post: dict, name: str, interests: list[str]) -> str:
     but genuine response. Replace this with LLM-generated comments for
     more natural engagement.
     """
-    title = post.get("title", "this")
+    post.get("title", "this")
     post_type = post.get("post_type", "discussion")
 
     text = (post.get("title", "") + " " + post.get("body", "")).lower()
-    interest_lower = [i.lower() for i in interests]
+    [i.lower() for i in interests]
     matched = [i for i in interests if i.lower() in text]
 
     if post_type == "question":
@@ -67,7 +62,7 @@ def generate_comment(post: dict, name: str, interests: list[str]) -> str:
             f"Relevant to my work on {matched[0]}. Following this thread."
         )
 
-    return f"Good read. Following this thread."
+    return "Good read. Following this thread."
 
 
 def generate_intro_post(name: str, bio: str, interests: list[str]) -> tuple[str, str]:

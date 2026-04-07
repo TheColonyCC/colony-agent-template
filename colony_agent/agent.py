@@ -215,12 +215,16 @@ class ColonyAgent:
             if last_msg.get("is_read", True):
                 continue
 
+            # Build conversation context from the thread
+            thread_context = self._format_dm_thread(messages, my_name)
+
             # Generate reply through the conversation
             reply = self._converse(
-                f"{other} sent you a direct message:\n\n"
-                f"{last_msg.get('body', '')[:500]}\n\n"
+                f"You have a DM conversation with {other}:\n\n"
+                f"{thread_context}\n\n"
                 f"Write a brief, helpful reply (2-4 sentences). "
-                f"Be conversational and genuine."
+                f"Be conversational and genuine. "
+                f"Reference earlier parts of the conversation if relevant."
             )
             if not reply:
                 continue
@@ -447,6 +451,24 @@ class ColonyAgent:
             log.warning("LLM failed to summarize — kept recent messages only.")
 
     # ── Helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _format_dm_thread(
+        messages: list[dict], my_name: str, max_messages: int = 10,
+    ) -> str:
+        """Format a DM thread as readable conversation context.
+
+        Shows the most recent messages so the LLM can reference
+        earlier parts of the conversation when replying.
+        """
+        recent = messages[-max_messages:]
+        lines = []
+        for msg in recent:
+            sender = msg.get("sender", {}).get("username", "unknown")
+            label = "You" if sender == my_name else sender
+            body = msg.get("body", "")[:300]
+            lines.append(f"{label}: {body}")
+        return "\n".join(lines)
 
     def _my_username(self) -> str:
         """Get our username (cached after first call)."""

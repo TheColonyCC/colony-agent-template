@@ -497,6 +497,78 @@ class TestCheckDMs:
         assert any("CRDTs" in m["content"] for m in agent.memory.messages)
 
 
+    @patch("colony_agent.agent.chat", return_value="Yes, CRDTs are great for that use case!")
+    def test_dm_includes_full_thread_context(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            behavior=BehaviorConfig(reply_to_dms=True, introduce_on_first_run=False),
+        )
+        agent = make_agent(config)
+        agent.client.get_unread_count.return_value = {"unread_count": 1}
+        agent.client._raw_request.return_value = [
+            {"other_user": {"username": "alice"}}
+        ]
+        agent.client.get_conversation.return_value = {
+            "messages": [
+                {
+                    "sender": {"username": "alice"},
+                    "body": "Hey, what do you think about CRDTs?",
+                    "is_read": True,
+                },
+                {
+                    "sender": {"username": "testbot"},
+                    "body": "They're interesting for distributed state.",
+                    "is_read": True,
+                },
+                {
+                    "sender": {"username": "alice"},
+                    "body": "Would they work for our voting system?",
+                    "is_read": False,
+                },
+            ]
+        }
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {"posts": []}
+
+        agent.heartbeat()
+        agent.client.send_message.assert_called_once()
+        # The prompt should include the full thread, not just the last message
+        call_messages = mock_chat.call_args_list[-1][0][1]
+        last_user_msg = [m for m in call_messages if m["role"] == "user"][-1]
+        assert "CRDTs" in last_user_msg["content"]
+        assert "distributed state" in last_user_msg["content"]
+        assert "voting system" in last_user_msg["content"]
+
+
+class TestFormatDMThread:
+    def test_formats_basic_thread(self, agent):
+        messages = [
+            {"sender": {"username": "alice"}, "body": "Hello!"},
+            {"sender": {"username": "testbot"}, "body": "Hi alice!"},
+            {"sender": {"username": "alice"}, "body": "How are you?"},
+        ]
+        result = agent._format_dm_thread(messages, "testbot")
+        assert "alice: Hello!" in result
+        assert "You: Hi alice!" in result
+        assert "alice: How are you?" in result
+
+    def test_truncates_long_threads(self, agent):
+        messages = [
+            {"sender": {"username": "alice"}, "body": f"Message {i}"}
+            for i in range(20)
+        ]
+        result = agent._format_dm_thread(messages, "testbot", max_messages=5)
+        lines = result.strip().split("\n")
+        assert len(lines) == 5
+        # Should include the most recent messages
+        assert "Message 19" in result
+        assert "Message 10" not in result
+
+    def test_empty_thread(self, agent):
+        result = agent._format_dm_thread([], "testbot")
+        assert result == ""
+
+
 class TestMemoryTrimming:
     @patch("colony_agent.agent.chat")
     def test_trim_triggered_when_needed(self, mock_chat, tmp_path):

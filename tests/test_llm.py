@@ -95,6 +95,28 @@ class TestAskLLM:
             result = ask_llm(config, "system", "prompt")
             assert result == ""
 
+    def test_url_error_returns_empty(self):
+        from urllib.error import URLError
+
+        config = LLMConfig(
+            provider="openai-compatible",
+            base_url="http://127.0.0.1:1",
+            model="test",
+        )
+        with patch("colony_agent.llm.urlopen", side_effect=URLError("connection refused")):
+            result = ask_llm(config, "system", "prompt")
+            assert result == ""
+
+    def test_os_error_returns_empty(self):
+        config = LLMConfig(
+            provider="openai-compatible",
+            base_url="http://127.0.0.1:1",
+            model="test",
+        )
+        with patch("colony_agent.llm.urlopen", side_effect=OSError("network unreachable")):
+            result = ask_llm(config, "system", "prompt")
+            assert result == ""
+
 
 class TestBuildSystemPrompt:
     def test_includes_name(self):

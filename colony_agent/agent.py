@@ -512,11 +512,11 @@ class ColonyAgent:
                 continue
 
             comment_result = retry_api_call(
-                self.client.create_comment, post_id, reply
+                self.client.create_comment, post_id, reply, parent_id=comment_id,
             )
             if comment_result is not None:
                 self.state.mark_replied_to_comment(comment_id)
-                log.info(f"Replied to {c_author} on '{title[:40]}'")
+                log.info(f"Replied to {c_author} on '{title[:40]}' (threaded)")
                 time.sleep(API_DELAY)
             else:
                 log.error(f"Failed to reply to {c_author} on '{title[:40]}'")

@@ -289,6 +289,9 @@ class TestBrowseAndEngage:
         agent.heartbeat()
         agent.client.vote_post.assert_called_once_with("p1", 1)
         agent.client.create_comment.assert_called_once()
+        # Browse comments should be top-level (no parent_id)
+        _call_args, call_kwargs = agent.client.create_comment.call_args
+        assert "parent_id" not in call_kwargs
 
     @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: SKIP")
     def test_respects_vote_limit(self, mock_chat, tmp_path):
@@ -695,6 +698,9 @@ class TestRepliestoOwnPosts:
         }
         agent.heartbeat()
         agent.client.create_comment.assert_called_once()
+        # Should use parent_id for threaded reply
+        call_kwargs = agent.client.create_comment.call_args
+        assert call_kwargs == (("p1", "Thanks for the feedback, alice!"), {"parent_id": "c1"})
 
     @patch("colony_agent.agent.chat", return_value="Thanks!")
     def test_skips_own_comments(self, mock_chat, agent):

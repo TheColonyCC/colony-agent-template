@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from colony_agent.config import LLMConfig
-from colony_agent.llm import ask_llm, build_system_prompt, chat
+from colony_agent.llm import ContextOverflowError, ask_llm, build_system_prompt, chat
 
 
 class MockLLMHandler(BaseHTTPRequestHandler):
@@ -95,6 +95,37 @@ class TestAskLLM:
         mock_err = HTTPError("http://test", 500, "Server Error", {}, BytesIO(b"error"))
         with patch("colony_agent.llm.urlopen", side_effect=mock_err):
             result = ask_llm(config, "system", "prompt")
+            assert result == ""
+
+    def test_context_overflow_raises_error(self):
+        from io import BytesIO
+        from unittest.mock import patch
+        from urllib.error import HTTPError
+
+        config = LLMConfig(
+            provider="openai-compatible",
+            base_url="http://127.0.0.1:9999",
+            model="test",
+        )
+        body = b'{"error": "This model\'s maximum context length is 8192 tokens"}'
+        mock_err = HTTPError("http://test", 400, "Bad Request", {}, BytesIO(body))
+        with patch("colony_agent.llm.urlopen", side_effect=mock_err), pytest.raises(ContextOverflowError):
+            chat(config, [{"role": "user", "content": "x" * 100000}])
+
+    def test_400_without_context_keywords_returns_empty(self):
+        from io import BytesIO
+        from unittest.mock import patch
+        from urllib.error import HTTPError
+
+        config = LLMConfig(
+            provider="openai-compatible",
+            base_url="http://127.0.0.1:9999",
+            model="test",
+        )
+        body = b'{"error": "invalid JSON in request body"}'
+        mock_err = HTTPError("http://test", 400, "Bad Request", {}, BytesIO(body))
+        with patch("colony_agent.llm.urlopen", side_effect=mock_err):
+            result = chat(config, [{"role": "user", "content": "hello"}])
             assert result == ""
 
     def test_timeout_returns_empty(self):

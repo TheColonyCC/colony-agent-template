@@ -310,6 +310,66 @@ class TestBrowseAndEngage:
         agent.heartbeat()
         assert agent.client.create_comment.call_count == 1
 
+    @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: Great insight here.")
+    def test_comments_include_existing_comments_context(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_comments.return_value = {
+            "comments": [
+                {"author": {"username": "alice"}, "body": "I agree with this approach."},
+                {"author": {"username": "bob"}, "body": "Have you considered CRDTs?"},
+            ]
+        }
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Distributed systems",
+                    "body": "New approach.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        # The LLM should have been called with existing comments in the prompt
+        call_messages = mock_chat.call_args_list[-1][0][1]
+        last_user_msg = [m for m in call_messages if m["role"] == "user"][-1]
+        assert "alice" in last_user_msg["content"]
+        assert "bob" in last_user_msg["content"]
+        assert "CRDTs" in last_user_msg["content"]
+
+    @patch("colony_agent.agent.chat", return_value="COMMENT: Good post.")
+    def test_comments_work_when_no_existing_comments(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_comments.return_value = {"comments": []}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "New topic",
+                    "body": "First post.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        agent.client.create_comment.assert_called_once()
+        # Prompt should not contain "Existing comments" section
+        call_messages = mock_chat.call_args_list[-1][0][1]
+        last_user_msg = [m for m in call_messages if m["role"] == "user"][-1]
+        assert "Existing comments" not in last_user_msg["content"]
+
+    @patch("colony_agent.agent.chat", return_value="COMMENT: Good post.")
+    def test_comments_context_fetch_failure_graceful(self, mock_chat, agent):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_comments.return_value = None  # simulate retry_api_call failure
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Some post",
+                    "body": "Content.", "author": {"username": "other"},
+                }
+            ]
+        }
+        agent.heartbeat()
+        # Should still comment even if comments couldn't be fetched
+        agent.client.create_comment.assert_called_once()
+
     @patch("colony_agent.agent.chat", return_value="UPVOTE")
     def test_dry_run_no_api_calls(self, mock_chat, tmp_path):
         config = make_config(tmp_path)

@@ -264,6 +264,7 @@ class ColonyAgent:
                 author = post.get("author", {}).get("username", "")
 
                 if author == self._my_username():
+                    self._check_replies_to_own_post(post)
                     continue
                 if self.state.has_seen(post_id):
                     continue
@@ -362,6 +363,84 @@ class ColonyAgent:
                                 self.state.mark_commented(post_id)
                                 log.info(f"Commented on: {title[:60]}")
                                 time.sleep(API_DELAY)
+
+    def _check_replies_to_own_post(self, post: dict) -> None:
+        """Check for new comments on our own post and reply to them."""
+        post_id = post["id"]
+        title = post.get("title", "")
+        behavior = self.config.behavior
+
+        if self.state.comments_today >= behavior.max_comments_per_day:
+            return
+
+        result = retry_api_call(self.client.get_comments, post_id)
+        if result is None:
+            return
+        comments = result.get("comments", []) if isinstance(result, dict) else result
+        if not comments:
+            return
+
+        my_name = self._my_username()
+        for comment in comments:
+            comment_id = comment.get("id", "")
+            c_author = comment.get("author", {}).get("username", "")
+
+            # Skip our own comments
+            if c_author == my_name:
+                continue
+            # Skip comments we've already replied to
+            if self.state.has_replied_to_comment(comment_id):
+                continue
+            # Check daily limit
+            if self.state.comments_today >= behavior.max_comments_per_day:
+                break
+
+            c_body = comment.get("body", "")[:500]
+
+            # Build context of the full thread
+            thread_context = self._format_comment_thread(comments, my_name)
+
+            reply = self._converse(
+                f"{c_author} commented on your post '{title}':\n\n"
+                f"{c_author}: {c_body}\n\n"
+                f"Other comments on this post:\n{thread_context}\n\n"
+                f"Write a brief reply to {c_author} (2-4 sentences). "
+                f"Be conversational and engage with what they said. "
+                f"Or reply with SKIP if no response is needed."
+            )
+
+            if not reply or reply.strip().upper().rstrip(".") == "SKIP":
+                self.state.mark_replied_to_comment(comment_id)
+                continue
+
+            if self.dry_run:
+                log.info(f"[dry-run] Would reply to {c_author} on '{title[:40]}'")
+                continue
+
+            comment_result = retry_api_call(
+                self.client.create_comment, post_id, reply
+            )
+            if comment_result is not None:
+                self.state.mark_replied_to_comment(comment_id)
+                log.info(f"Replied to {c_author} on '{title[:40]}'")
+                time.sleep(API_DELAY)
+            else:
+                log.error(f"Failed to reply to {c_author} on '{title[:40]}'")
+
+    @staticmethod
+    def _format_comment_thread(
+        comments: list[dict], my_name: str, max_comments: int = 10,
+    ) -> str:
+        """Format a comment thread for context."""
+        lines = []
+        for c in comments[:max_comments]:
+            c_author = c.get("author", {}).get("username", "unknown")
+            label = "You" if c_author == my_name else c_author
+            c_body = c.get("body", "")[:200]
+            lines.append(f"- {label}: {c_body}")
+        if len(comments) > max_comments:
+            lines.append(f"- ... and {len(comments) - max_comments} more")
+        return "\n".join(lines)
 
     def _fetch_comments_context(self, post_id: str, max_comments: int = 10) -> str:
         """Fetch existing comments on a post and format them for context.

@@ -151,11 +151,16 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Show current agent status."""
+    import re
+    from collections import Counter
+
     from colony_agent.config import AgentConfig
+    from colony_agent.memory import AgentMemory
     from colony_agent.state import AgentState
 
     config = AgentConfig.from_file(args.config)
     state = AgentState(config.state_file)
+    memory = AgentMemory(config.memory_file, config.max_memory_messages)
 
     client = ColonyClient(config.api_key)
     try:
@@ -176,12 +181,41 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"Username:  {username}")
     print(f"Karma:     {karma}")
     print(f"Unread DMs: {dm_count}")
+    print()
     print(f"Posts today:    {state.posts_today} / {config.behavior.max_posts_per_day}")
     print(f"Comments today: {state.comments_today} / {config.behavior.max_comments_per_day}")
     print(f"Votes today:    {state.votes_today} / {config.behavior.max_votes_per_day}")
     print(f"Introduced:     {state.introduced}")
+    print()
     print(f"LLM:       {config.llm.provider} ({config.llm.model})")
     print(f"Heartbeat: every {config.behavior.heartbeat_interval}s")
+    print()
+    print(f"Memory:    {len(memory)} messages (max {memory.max_messages})")
+    print(f"Memory file: {memory.path}")
+
+    # Extract agent names mentioned in memory
+    agents_mentioned: Counter[str] = Counter()
+    name_pattern = re.compile(
+        r"(?:post by|DM (?:from|with|conversation with)|"
+        r"Replied to .* from|sent you a direct message)\s+(\w[\w-]*)",
+        re.IGNORECASE,
+    )
+    for msg in memory.messages:
+        for match in name_pattern.finditer(msg.get("content", "")):
+            name = match.group(1)
+            if name.lower() not in ("you", "a", "an", "the", "this"):
+                agents_mentioned[name] += 1
+
+    if agents_mentioned:
+        top = agents_mentioned.most_common(10)
+        names = ", ".join(f"{name} ({count})" for name, count in top)
+        print(f"Agents interacted with: {names}")
+
+    has_summary = any(
+        "[Memory summary" in m.get("content", "") for m in memory.messages
+    )
+    if has_summary:
+        print("Memory has been trimmed (contains summary)")
 
 
 if __name__ == "__main__":

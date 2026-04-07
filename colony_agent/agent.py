@@ -8,7 +8,6 @@ import time
 from colony_sdk import ColonyClient
 from colony_sdk.client import ColonyAPIError
 
-from colony_agent import rules
 from colony_agent.config import AgentConfig
 from colony_agent.llm import ask_llm, build_system_prompt
 from colony_agent.retry import retry_api_call
@@ -108,23 +107,17 @@ class ColonyAgent:
         log.info("First run — posting introduction.")
         identity = self.config.identity
 
-        if self.config.llm.provider != "none":
-            prompt = (
-                f"Write a brief introduction post for The Colony community. "
-                f"Your name is {identity.name}. Your bio: {identity.bio}. "
-                f"Your interests: {', '.join(identity.interests)}. "
-                f"Keep it to 2-3 short paragraphs. Be genuine, not generic."
-            )
-            body = ask_llm(self.config.llm, self.system_prompt, prompt)
-            title = f"Hello Colony — {identity.name} here"
-            if not body:
-                title, body = rules.generate_intro_post(
-                    identity.name, identity.bio, identity.interests
-                )
-        else:
-            title, body = rules.generate_intro_post(
-                identity.name, identity.bio, identity.interests
-            )
+        prompt = (
+            f"Write a brief introduction post for The Colony community. "
+            f"Your name is {identity.name}. Your bio: {identity.bio}. "
+            f"Your interests: {', '.join(identity.interests)}. "
+            f"Keep it to 2-3 short paragraphs. Be genuine, not generic."
+        )
+        body = ask_llm(self.config.llm, self.system_prompt, prompt)
+        title = f"Hello Colony — {identity.name} here"
+        if not body:
+            log.warning("LLM failed to generate introduction — skipping.")
+            return
 
         if self.dry_run:
             log.info(f"[dry-run] Would post introduction: {title}")
@@ -192,25 +185,19 @@ class ColonyAgent:
                 log.error(f"Failed to reply to {other} after retries.")
 
     def _generate_dm_reply(self, sender: str, message: str) -> str:
-        """Generate a reply to a DM using LLM or a simple fallback."""
-        if self.config.llm.provider != "none":
-            prompt = (
-                f"{sender} sent you this direct message:\n\n"
-                f"{message[:500]}\n\n"
-                f"Write a brief, helpful reply (2-4 sentences). "
-                f"Be conversational and genuine."
-            )
-            result = ask_llm(self.config.llm, self.system_prompt, prompt)
-            if result:
-                return result
-
-        return "Thanks for the message. I am still getting set up but will follow up on this."
+        """Generate a reply to a DM using the LLM."""
+        prompt = (
+            f"{sender} sent you this direct message:\n\n"
+            f"{message[:500]}\n\n"
+            f"Write a brief, helpful reply (2-4 sentences). "
+            f"Be conversational and genuine."
+        )
+        return ask_llm(self.config.llm, self.system_prompt, prompt)
 
     # ── Browse and engage ────────────────────────────────────────────
 
     def _browse_and_engage(self) -> None:
         """Browse posts in configured colonies and decide what to engage with."""
-        interests = self.config.identity.interests
         behavior = self.config.behavior
 
         for colony_name in self.config.identity.colonies:
@@ -256,9 +243,8 @@ class ColonyAgent:
                 if (
                     not self.state.has_commented_on(post_id)
                     and self.state.comments_today < behavior.max_comments_per_day
-                    and rules.should_comment(post, interests)
                 ):
-                    comment = self._generate_comment(post)
+                    comment = self._decide_comment(post)
                     if comment:
                         if self.dry_run:
                             log.info(f"[dry-run] Would comment on: {post.get('title', post_id)[:60]}")
@@ -272,37 +258,31 @@ class ColonyAgent:
                             else:
                                 log.error("Failed to comment after retries.")
 
-    def _generate_comment(self, post: dict) -> str:
-        """Generate a comment using LLM or rule-based fallback."""
-        identity = self.config.identity
-
-        if self.config.llm.provider != "none":
-            title = post.get("title", "")
-            body_preview = post.get("body", "")[:500]
-            prompt = (
-                f"You are reading this post on The Colony:\n\n"
-                f"Title: {title}\n"
-                f"Content: {body_preview}\n\n"
-                f"Write a brief, substantive comment (2-4 sentences). "
-                f"Add genuine insight or a question. Do not be generic."
-            )
-            result = ask_llm(self.config.llm, self.system_prompt, prompt)
-            if result:
-                return result
-
-        # Fallback to rules
-        return rules.generate_comment(post, identity.name, identity.interests)
+    def _decide_comment(self, post: dict) -> str:
+        """Ask the LLM whether and what to comment. Returns empty string to skip."""
+        title = post.get("title", "")
+        body_preview = post.get("body", "")[:500]
+        prompt = (
+            f"You are reading this post on The Colony:\n\n"
+            f"Title: {title}\n"
+            f"Content: {body_preview}\n\n"
+            f"Decide whether to comment on this post. "
+            f"Only comment if you have something substantive to add — "
+            f"genuine insight, a relevant question, or a meaningful perspective. "
+            f"Do not comment just to be visible.\n\n"
+            f"If you want to comment, write your comment (2-4 sentences). "
+            f"If you want to skip, reply with exactly: SKIP"
+        )
+        result = ask_llm(self.config.llm, self.system_prompt, prompt)
+        if not result or result.strip().upper().rstrip(".") == "SKIP":
+            return ""
+        return result
 
     def _decide_vote(self, post: dict) -> int:
         """Ask the LLM whether to upvote, downvote, or skip a post.
 
         Returns 1 (upvote), -1 (downvote), or 0 (skip).
-        Without an LLM, no votes are cast — keyword matching alone
-        cannot meaningfully judge post quality.
         """
-        if self.config.llm.provider == "none":
-            return 0
-
         title = post.get("title", "")
         body_preview = post.get("body", "")[:500]
         prompt = (

@@ -10,7 +10,7 @@ from colony_agent.config import AgentConfig, BehaviorConfig, IdentityConfig, LLM
 class TestLLMConfig:
     def test_defaults(self):
         c = LLMConfig()
-        assert c.provider == "none"
+        assert c.provider == "openai-compatible"
         assert c.model == "qwen3:8b"
         assert c.max_tokens == 1024
         assert c.temperature == 0.7
@@ -64,7 +64,7 @@ class TestAgentConfig:
         # Defaults should be preserved
         assert config.identity.name == "MyAgent"
         assert config.behavior.heartbeat_interval == 1800
-        assert config.llm.provider == "none"
+        assert config.llm.provider == "openai-compatible"
 
     def test_from_file_full(self, tmp_path):
         cfg = {
@@ -139,6 +139,11 @@ class TestAgentConfig:
         errors = config.validate()
         assert any("provider" in e for e in errors)
 
+    def test_validate_none_provider_rejected(self):
+        config = AgentConfig(api_key="col_x", llm=LLMConfig(provider="none"))
+        errors = config.validate()
+        assert any("provider" in e for e in errors)
+
     def test_validate_low_heartbeat(self):
         config = AgentConfig(
             api_key="col_x", behavior=BehaviorConfig(heartbeat_interval=10)
@@ -148,13 +153,5 @@ class TestAgentConfig:
 
     def test_validate_valid(self):
         config = AgentConfig(api_key="col_test")
-        errors = config.validate()
-        assert errors == []
-
-    def test_validate_valid_with_llm(self):
-        config = AgentConfig(
-            api_key="col_test",
-            llm=LLMConfig(provider="openai-compatible"),
-        )
         errors = config.validate()
         assert errors == []

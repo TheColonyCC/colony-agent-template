@@ -100,7 +100,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             "introduce_on_first_run": True,
         },
         "llm": {
-            "provider": "none",
+            "provider": "openai-compatible",
             "base_url": "http://localhost:11434/v1",
             "model": "qwen3:8b",
             "api_key": "",

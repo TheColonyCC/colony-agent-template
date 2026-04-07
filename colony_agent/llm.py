@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from colony_agent.config import LLMConfig
@@ -47,8 +47,8 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
     except (KeyError, IndexError) as e:
         log.warning("LLM returned unexpected response format: %s", e)
         return ""
-    except TimeoutError:
-        log.warning("LLM request timed out (%s)", config.base_url)
+    except (URLError, TimeoutError, OSError) as e:
+        log.warning("LLM connection error (%s): %s", config.base_url, e)
         return ""
 
 

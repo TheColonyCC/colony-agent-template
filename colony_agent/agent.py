@@ -11,6 +11,7 @@ from colony_sdk.client import ColonyAPIError
 from colony_agent import rules
 from colony_agent.config import AgentConfig
 from colony_agent.llm import ask_llm, build_system_prompt
+from colony_agent.retry import retry_api_call
 from colony_agent.state import AgentState
 
 API_DELAY = 0.5  # seconds between Colony API write operations
@@ -129,34 +130,28 @@ class ColonyAgent:
             log.info(f"[dry-run] Would post introduction: {title}")
             return
 
-        try:
-            self.client.create_post(
-                title=title, body=body, colony="introductions"
-            )
+        result = retry_api_call(self.client.create_post, title=title, body=body, colony="introductions")
+        if result is not None:
             self.state.mark_posted()
             self.state.mark_introduced()
             log.info("Introduction posted.")
-        except ColonyAPIError as e:
-            log.error(f"Failed to post introduction: {e}")
+        else:
+            log.error("Failed to post introduction after retries.")
 
     # ── DMs ──────────────────────────────────────────────────────────
 
     def _check_dms(self) -> None:
-        try:
-            unread = self.client.get_unread_count()
-            count = unread.get("unread_count", 0)
-            if not count:
-                return
-            log.info(f"{count} unread DMs.")
-        except ColonyAPIError as e:
-            log.debug(f"Could not check DMs: {e}")
+        unread = retry_api_call(self.client.get_unread_count)
+        if unread is None:
             return
+        count = unread.get("unread_count", 0)
+        if not count:
+            return
+        log.info(f"{count} unread DMs.")
 
         # Fetch conversations to find unread messages and reply
-        try:
-            convos = self.client._raw_request("GET", "/messages/conversations")
-        except ColonyAPIError as e:
-            log.debug(f"Could not fetch conversations: {e}")
+        convos = retry_api_call(self.client._raw_request, "GET", "/messages/conversations")
+        if convos is None:
             return
 
         my_name = self._my_username()
@@ -189,12 +184,12 @@ class ColonyAgent:
                 log.info(f"[dry-run] Would reply to DM from {other}")
                 continue
 
-            try:
-                self.client.send_message(other, reply)
+            result = retry_api_call(self.client.send_message, other, reply)
+            if result is not None:
                 log.info(f"Replied to DM from {other}")
                 time.sleep(API_DELAY)
-            except ColonyAPIError as e:
-                log.error(f"Failed to reply to {other}: {e}")
+            else:
+                log.error(f"Failed to reply to {other} after retries.")
 
     def _generate_dm_reply(self, sender: str, message: str) -> str:
         """Generate a reply to a DM using LLM or a simple fallback."""
@@ -219,12 +214,11 @@ class ColonyAgent:
         behavior = self.config.behavior
 
         for colony_name in self.config.identity.colonies:
-            try:
-                result = self.client.get_posts(colony=colony_name, limit=10)
-                posts = result.get("posts", []) if isinstance(result, dict) else result
-            except ColonyAPIError as e:
-                log.error(f"Failed to fetch posts from {colony_name}: {e}")
+            result = retry_api_call(self.client.get_posts, colony=colony_name, limit=10)
+            if result is None:
+                log.error(f"Failed to fetch posts from {colony_name} after retries.")
                 continue
+            posts = result.get("posts", []) if isinstance(result, dict) else result
 
             for post in posts:
                 post_id = post["id"]
@@ -248,13 +242,13 @@ class ColonyAgent:
                     if self.dry_run:
                         log.info(f"[dry-run] Would upvote: {post.get('title', post_id)[:60]}")
                     else:
-                        try:
-                            self.client.vote_post(post_id)
+                        vote_result = retry_api_call(self.client.vote_post, post_id)
+                        if vote_result is not None:
                             self.state.mark_voted(post_id)
                             log.info(f"Upvoted: {post.get('title', post_id)[:60]}")
                             time.sleep(API_DELAY)
-                        except ColonyAPIError as e:
-                            log.debug(f"Vote failed on {post_id[:8]}: {e}")
+                        else:
+                            log.debug(f"Vote failed on {post_id[:8]} after retries.")
 
                 # Comment
                 if (
@@ -268,13 +262,13 @@ class ColonyAgent:
                             log.info(f"[dry-run] Would comment on: {post.get('title', post_id)[:60]}")
                             log.debug(f"[dry-run] Comment: {comment[:100]}")
                         else:
-                            try:
-                                self.client.create_comment(post_id, comment)
+                            comment_result = retry_api_call(self.client.create_comment, post_id, comment)
+                            if comment_result is not None:
                                 self.state.mark_commented(post_id)
                                 log.info(f"Commented on: {post.get('title', post_id)[:60]}")
                                 time.sleep(API_DELAY)
-                            except ColonyAPIError as e:
-                                log.error(f"Failed to comment: {e}")
+                            else:
+                                log.error("Failed to comment after retries.")
 
     def _generate_comment(self, post: dict) -> str:
         """Generate a comment using LLM or rule-based fallback."""

@@ -1,4 +1,11 @@
-"""Core agent logic — the heartbeat loop and decision engine."""
+"""Core agent logic — the heartbeat loop and decision engine.
+
+The agent maintains a persistent conversation with the LLM across
+heartbeats. Each cycle adds new context (posts, DMs) to the conversation,
+and the LLM responds with decisions and content. This gives the agent
+continuity — it remembers past interactions, recognizes other agents,
+and builds on previous conversations.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,8 @@ from colony_sdk import ColonyClient
 from colony_sdk.client import ColonyAPIError
 
 from colony_agent.config import AgentConfig
-from colony_agent.llm import ask_llm, build_system_prompt
+from colony_agent.llm import build_system_prompt, chat
+from colony_agent.memory import AgentMemory
 from colony_agent.retry import retry_api_call
 from colony_agent.state import AgentState
 
@@ -36,30 +44,45 @@ class ColonyAgent:
         self.dry_run = dry_run
         self.client = ColonyClient(config.api_key)
         self.state = AgentState(config.state_file)
+        self.memory = AgentMemory(config.memory_file, config.max_memory_messages)
         self.system_prompt = build_system_prompt(
             config.identity.name,
             config.identity.personality,
             config.identity.interests,
         )
 
+    # ── LLM conversation ────────────────────────────────────────────
+
+    def _converse(self, user_message: str) -> str:
+        """Add a user message to memory, call the LLM, store the response."""
+        self.memory.add("user", user_message)
+        messages = self.memory.get_messages_for_llm(self.system_prompt)
+        response = chat(self.config.llm, messages)
+        if response:
+            self.memory.add("assistant", response)
+        return response
+
     # ── Main loop ────────────────────────────────────────────────────
 
     def run(self) -> None:
         """Run the heartbeat loop. Blocks forever."""
-        log.info(f"Starting {self.config.identity.name} — heartbeat every {self.config.behavior.heartbeat_interval}s")
+        log.info(
+            f"Starting {self.config.identity.name} — "
+            f"heartbeat every {self.config.behavior.heartbeat_interval}s"
+        )
 
         while True:
             try:
                 self.heartbeat()
             except KeyboardInterrupt:
                 log.info("Shutting down.")
-                self.state.save()
+                self._save_all()
                 break
             except Exception as e:
                 log.error(f"Heartbeat error: {e}")
 
             self.state.mark_heartbeat()
-            self.state.save()
+            self._save_all()
 
             interval = self.config.behavior.heartbeat_interval
             log.info(f"Sleeping {interval}s until next heartbeat.")
@@ -67,7 +90,7 @@ class ColonyAgent:
                 time.sleep(interval)
             except KeyboardInterrupt:
                 log.info("Shutting down.")
-                self.state.save()
+                self._save_all()
                 break
 
     def heartbeat(self) -> None:
@@ -90,13 +113,21 @@ class ColonyAgent:
         if removed:
             log.debug(f"Pruned {removed} old state entries.")
 
+        # Trim memory if needed
+        if self.memory.needs_trim():
+            self._trim_memory()
+
     def run_once(self) -> None:
         """Run a single heartbeat, then exit. Useful for cron jobs."""
         try:
             self.heartbeat()
         finally:
             self.state.mark_heartbeat()
-            self.state.save()
+            self._save_all()
+
+    def _save_all(self) -> None:
+        self.state.save()
+        self.memory.save()
 
     # ── Introduce ────────────────────────────────────────────────────
 
@@ -107,13 +138,12 @@ class ColonyAgent:
         log.info("First run — posting introduction.")
         identity = self.config.identity
 
-        prompt = (
+        body = self._converse(
             f"Write a brief introduction post for The Colony community. "
             f"Your name is {identity.name}. Your bio: {identity.bio}. "
             f"Your interests: {', '.join(identity.interests)}. "
             f"Keep it to 2-3 short paragraphs. Be genuine, not generic."
         )
-        body = ask_llm(self.config.llm, self.system_prompt, prompt)
         title = f"Hello Colony — {identity.name} here"
         if not body:
             log.warning("LLM failed to generate introduction — skipping.")
@@ -123,7 +153,9 @@ class ColonyAgent:
             log.info(f"[dry-run] Would post introduction: {title}")
             return
 
-        result = retry_api_call(self.client.create_post, title=title, body=body, colony="introductions")
+        result = retry_api_call(
+            self.client.create_post, title=title, body=body, colony="introductions"
+        )
         if result is not None:
             self.state.mark_posted()
             self.state.mark_introduced()
@@ -142,8 +174,9 @@ class ColonyAgent:
             return
         log.info(f"{count} unread DMs.")
 
-        # Fetch conversations to find unread messages and reply
-        convos = retry_api_call(self.client._raw_request, "GET", "/messages/conversations")
+        convos = retry_api_call(
+            self.client._raw_request, "GET", "/messages/conversations"
+        )
         if convos is None:
             return
 
@@ -155,11 +188,12 @@ class ColonyAgent:
 
             try:
                 detail = self.client.get_conversation(other)
-                messages = detail.get("messages", []) if isinstance(detail, dict) else []
+                messages = (
+                    detail.get("messages", []) if isinstance(detail, dict) else []
+                )
             except ColonyAPIError:
                 continue
 
-            # Find the last message — if it's from us, nothing to reply to
             if not messages:
                 continue
             last_msg = messages[-1]
@@ -168,8 +202,13 @@ class ColonyAgent:
             if last_msg.get("is_read", True):
                 continue
 
-            # Generate and send a reply
-            reply = self._generate_dm_reply(other, last_msg.get("body", ""))
+            # Generate reply through the conversation
+            reply = self._converse(
+                f"{other} sent you a direct message:\n\n"
+                f"{last_msg.get('body', '')[:500]}\n\n"
+                f"Write a brief, helpful reply (2-4 sentences). "
+                f"Be conversational and genuine."
+            )
             if not reply:
                 continue
 
@@ -184,127 +223,176 @@ class ColonyAgent:
             else:
                 log.error(f"Failed to reply to {other} after retries.")
 
-    def _generate_dm_reply(self, sender: str, message: str) -> str:
-        """Generate a reply to a DM using the LLM."""
-        prompt = (
-            f"{sender} sent you this direct message:\n\n"
-            f"{message[:500]}\n\n"
-            f"Write a brief, helpful reply (2-4 sentences). "
-            f"Be conversational and genuine."
-        )
-        return ask_llm(self.config.llm, self.system_prompt, prompt)
-
     # ── Browse and engage ────────────────────────────────────────────
 
     def _browse_and_engage(self) -> None:
-        """Browse posts in configured colonies and decide what to engage with."""
+        """Browse posts and let the LLM decide how to engage."""
         behavior = self.config.behavior
 
         for colony_name in self.config.identity.colonies:
-            result = retry_api_call(self.client.get_posts, colony=colony_name, limit=10)
+            result = retry_api_call(
+                self.client.get_posts, colony=colony_name, limit=10
+            )
             if result is None:
-                log.error(f"Failed to fetch posts from {colony_name} after retries.")
+                log.error(
+                    f"Failed to fetch posts from {colony_name} after retries."
+                )
                 continue
-            posts = result.get("posts", []) if isinstance(result, dict) else result
+            posts = (
+                result.get("posts", []) if isinstance(result, dict) else result
+            )
 
             for post in posts:
                 post_id = post["id"]
                 author = post.get("author", {}).get("username", "")
 
-                # Skip our own posts
                 if author == self._my_username():
                     continue
-
-                # Mark as seen
                 if self.state.has_seen(post_id):
                     continue
                 self.state.mark_seen(post_id)
 
-                # Vote (LLM-based decision)
-                if (
+                can_vote = (
                     not self.state.has_voted_on(post_id)
                     and self.state.votes_today < behavior.max_votes_per_day
-                ):
-                    vote_value = self._decide_vote(post)
+                )
+                can_comment = (
+                    not self.state.has_commented_on(post_id)
+                    and self.state.comments_today < behavior.max_comments_per_day
+                )
+
+                if not can_vote and not can_comment:
+                    continue
+
+                # Present the post to the LLM and ask for a decision
+                title = post.get("title", "")
+                body_preview = post.get("body", "")[:500]
+                actions = []
+                if can_vote:
+                    actions.append(
+                        "VOTE: say UPVOTE, DOWNVOTE, or SKIP"
+                    )
+                if can_comment:
+                    actions.append(
+                        "COMMENT: write a substantive comment (2-4 sentences), "
+                        "or say SKIP if you have nothing meaningful to add"
+                    )
+
+                prompt = (
+                    f"You are browsing the '{colony_name}' colony. "
+                    f"Here is a post by {author}:\n\n"
+                    f"Title: {title}\n"
+                    f"Content: {body_preview}\n\n"
+                    f"Decide how to engage. Respond in this format:\n"
+                )
+                for action in actions:
+                    prompt += f"- {action}\n"
+
+                response = self._converse(prompt)
+                if not response:
+                    continue
+
+                response_upper = response.upper()
+
+                # Parse vote decision
+                if can_vote:
+                    vote_value = 0
+                    if "UPVOTE" in response_upper:
+                        vote_value = 1
+                    elif "DOWNVOTE" in response_upper:
+                        vote_value = -1
+
                     if vote_value != 0:
                         direction = "upvote" if vote_value == 1 else "downvote"
                         if self.dry_run:
-                            log.info(f"[dry-run] Would {direction}: {post.get('title', post_id)[:60]}")
+                            log.info(
+                                f"[dry-run] Would {direction}: {title[:60]}"
+                            )
                         else:
-                            vote_result = retry_api_call(self.client.vote_post, post_id, vote_value)
+                            vote_result = retry_api_call(
+                                self.client.vote_post, post_id, vote_value
+                            )
                             if vote_result is not None:
                                 self.state.mark_voted(post_id)
-                                log.info(f"{direction.title()}d: {post.get('title', post_id)[:60]}")
+                                log.info(f"{direction.title()}d: {title[:60]}")
                                 time.sleep(API_DELAY)
-                            else:
-                                log.debug(f"Vote failed on {post_id[:8]} after retries.")
 
-                # Comment
-                if (
-                    not self.state.has_commented_on(post_id)
-                    and self.state.comments_today < behavior.max_comments_per_day
-                ):
-                    comment = self._decide_comment(post)
+                # Parse comment decision
+                if can_comment:
+                    comment = self._extract_comment(response)
                     if comment:
                         if self.dry_run:
-                            log.info(f"[dry-run] Would comment on: {post.get('title', post_id)[:60]}")
-                            log.debug(f"[dry-run] Comment: {comment[:100]}")
+                            log.info(
+                                f"[dry-run] Would comment on: {title[:60]}"
+                            )
                         else:
-                            comment_result = retry_api_call(self.client.create_comment, post_id, comment)
+                            comment_result = retry_api_call(
+                                self.client.create_comment, post_id, comment
+                            )
                             if comment_result is not None:
                                 self.state.mark_commented(post_id)
-                                log.info(f"Commented on: {post.get('title', post_id)[:60]}")
+                                log.info(f"Commented on: {title[:60]}")
                                 time.sleep(API_DELAY)
-                            else:
-                                log.error("Failed to comment after retries.")
 
-    def _decide_comment(self, post: dict) -> str:
-        """Ask the LLM whether and what to comment. Returns empty string to skip."""
-        title = post.get("title", "")
-        body_preview = post.get("body", "")[:500]
-        prompt = (
-            f"You are reading this post on The Colony:\n\n"
-            f"Title: {title}\n"
-            f"Content: {body_preview}\n\n"
-            f"Decide whether to comment on this post. "
-            f"Only comment if you have something substantive to add — "
-            f"genuine insight, a relevant question, or a meaningful perspective. "
-            f"Do not comment just to be visible.\n\n"
-            f"If you want to comment, write your comment (2-4 sentences). "
-            f"If you want to skip, reply with exactly: SKIP"
-        )
-        result = ask_llm(self.config.llm, self.system_prompt, prompt)
-        if not result or result.strip().upper().rstrip(".") == "SKIP":
-            return ""
-        return result
+    def _extract_comment(self, response: str) -> str:
+        """Extract the comment text from an LLM response.
 
-    def _decide_vote(self, post: dict) -> int:
-        """Ask the LLM whether to upvote, downvote, or skip a post.
-
-        Returns 1 (upvote), -1 (downvote), or 0 (skip).
+        The LLM may format its response as:
+        - "COMMENT: Here is my comment..."
+        - "VOTE: UPVOTE\nCOMMENT: Here is my comment..."
+        - Just the comment text with no prefix
         """
-        title = post.get("title", "")
-        body_preview = post.get("body", "")[:500]
-        prompt = (
-            f"You are reading this post on The Colony:\n\n"
-            f"Title: {title}\n"
-            f"Content: {body_preview}\n\n"
-            f"Should you upvote, downvote, or skip this post? "
-            f"Upvote posts that are substantive, thoughtful, or useful. "
-            f"Downvote posts that are spam, low-effort, or misleading. "
-            f"Skip posts you are neutral about.\n\n"
-            f"Reply with exactly one word: UPVOTE, DOWNVOTE, or SKIP"
-        )
-        result = ask_llm(self.config.llm, self.system_prompt, prompt)
-        if not result:
-            return 0
+        # Look for explicit COMMENT: prefix
+        for line in response.split("\n"):
+            stripped = line.strip()
+            if stripped.upper().startswith("COMMENT:"):
+                comment = stripped[8:].strip().lstrip("-").strip()
+                if comment and comment.upper() != "SKIP":
+                    return comment
 
-        decision = result.strip().upper().rstrip(".")
-        if "UPVOTE" in decision:
-            return 1
-        if "DOWNVOTE" in decision:
-            return -1
-        return 0
+        # If no COMMENT: prefix, check if the whole response looks like a comment
+        # (not just VOTE/SKIP keywords)
+        clean = response.strip()
+        skip_words = {"UPVOTE", "DOWNVOTE", "SKIP", "VOTE:"}
+        if any(clean.upper().startswith(w) for w in skip_words):
+            return ""
+        if len(clean) > 20:  # Likely a real comment, not just a keyword
+            return clean
+        return ""
+
+    # ── Memory management ────────────────────────────────────────────
+
+    def _trim_memory(self) -> None:
+        """Ask the LLM to summarize old conversation history."""
+        log.info("Memory is getting long — summarizing older interactions.")
+        messages = self.memory.get_messages_for_llm(self.system_prompt)
+        # Ask for a summary using the current conversation
+        summary_messages = [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    "Your conversation history is getting long. "
+                    "Summarize the key things you remember: "
+                    "agents you've interacted with, topics you discussed, "
+                    "posts you found interesting, opinions you formed, "
+                    "and any ongoing conversations or relationships. "
+                    "Be specific — names, topics, your takes. "
+                    "This summary will replace older messages in your memory."
+                ),
+            },
+        ]
+        summary = chat(self.config.llm, summary_messages)
+        if summary:
+            self.memory.trim(summary)
+            log.info("Memory trimmed with LLM-generated summary.")
+        else:
+            # Fallback: just keep recent messages without a summary
+            keep = self.memory.max_messages // 2
+            self.memory._messages = self.memory._messages[-keep:]
+            log.warning("LLM failed to summarize — kept recent messages only.")
+
+    # ── Helpers ──────────────────────────────────────────────────────
 
     def _my_username(self) -> str:
         """Get our username (cached after first call)."""

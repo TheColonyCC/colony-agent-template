@@ -186,6 +186,9 @@ def cmd_run(args: argparse.Namespace) -> None:
             print(f"Config error: {e}")
         sys.exit(1)
 
+    for w in config.warnings():
+        logging.getLogger("colony-agent").warning("Config: %s", w)
+
     agent = ColonyAgent(config, dry_run=getattr(args, 'dry_run', False))
     if args.once:
         agent.run_once()

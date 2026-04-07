@@ -165,7 +165,60 @@ class TestAgentConfig:
         errors = config.validate()
         assert any("heartbeat_interval" in e for e in errors)
 
+    def test_validate_empty_base_url(self):
+        config = AgentConfig(api_key="col_x", llm=LLMConfig(base_url=""))
+        errors = config.validate()
+        assert any("base_url" in e for e in errors)
+
+    def test_validate_empty_model(self):
+        config = AgentConfig(api_key="col_x", llm=LLMConfig(model=""))
+        errors = config.validate()
+        assert any("model" in e for e in errors)
+
+    def test_validate_empty_name(self):
+        config = AgentConfig(api_key="col_x", identity=IdentityConfig(name=""))
+        errors = config.validate()
+        assert any("name" in e for e in errors)
+
+    def test_validate_empty_colonies(self):
+        config = AgentConfig(api_key="col_x", identity=IdentityConfig(colonies=[]))
+        errors = config.validate()
+        assert any("colonies" in e for e in errors)
+
     def test_validate_valid(self):
         config = AgentConfig(api_key="col_test")
         errors = config.validate()
         assert errors == []
+
+
+class TestWarnings:
+    def test_no_warnings_with_customized_config(self):
+        config = AgentConfig(
+            api_key="col_x",
+            identity=IdentityConfig(
+                bio="I research distributed systems.",
+                personality="Technical and thorough.",
+                interests=["CRDTs", "consensus"],
+            ),
+        )
+        assert config.warnings() == []
+
+    def test_warns_empty_interests(self):
+        config = AgentConfig(api_key="col_x", identity=IdentityConfig(interests=[]))
+        warns = config.warnings()
+        assert any("interests" in w for w in warns)
+
+    def test_warns_default_bio(self):
+        config = AgentConfig(api_key="col_x")
+        warns = config.warnings()
+        assert any("bio" in w for w in warns)
+
+    def test_warns_default_personality(self):
+        config = AgentConfig(api_key="col_x")
+        warns = config.warnings()
+        assert any("personality" in w for w in warns)
+
+    def test_warns_low_memory(self):
+        config = AgentConfig(api_key="col_x", max_memory_messages=5)
+        warns = config.warnings()
+        assert any("memory" in w.lower() for w in warns)

@@ -110,4 +110,50 @@ class AgentConfig:
             errors.append(f"llm.provider must be 'openai-compatible', got '{self.llm.provider}'")
         if self.behavior.heartbeat_interval < 60:
             errors.append("heartbeat_interval must be at least 60 seconds")
+        if not self.llm.base_url:
+            errors.append("llm.base_url is required")
+        if not self.llm.model:
+            errors.append("llm.model is required")
+        if not self.identity.name:
+            errors.append("identity.name is required")
+        if not self.identity.colonies:
+            errors.append("identity.colonies must contain at least one colony")
+
+        # Check file paths are writable
+        for label, path in [("state_file", self.state_file), ("memory_file", self.memory_file)]:
+            p = Path(path)
+            parent = p.parent
+            if p.exists() and not os.access(p, os.W_OK):
+                errors.append(f"{label} is not writable: {path}")
+            elif not p.exists() and parent.exists() and not os.access(parent, os.W_OK):
+                errors.append(f"{label} directory is not writable: {parent}")
+
         return errors
+
+    def warnings(self) -> list[str]:
+        """Return non-fatal warnings about the configuration."""
+        warns = []
+        if not self.identity.interests:
+            warns.append(
+                "identity.interests is empty — the agent won't have "
+                "topic context for LLM decisions"
+            )
+        if not self.identity.bio or self.identity.bio == "An AI agent on The Colony.":
+            warns.append(
+                "identity.bio is generic — a specific bio helps the LLM "
+                "generate better introductions and comments"
+            )
+        if (
+            not self.identity.personality
+            or self.identity.personality == "Friendly, curious, and helpful."
+        ):
+            warns.append(
+                "identity.personality is the default — customizing it "
+                "gives the agent a more distinctive voice"
+            )
+        if self.max_memory_messages < 20:
+            warns.append(
+                f"max_memory_messages is very low ({self.max_memory_messages}) "
+                f"— the agent will forget context quickly"
+            )
+        return warns

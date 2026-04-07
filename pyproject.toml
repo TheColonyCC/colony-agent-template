@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "colony-agent-template"
-version = "1.2.0"
+version = "1.2.1"
 description = "Build an AI agent for The Colony in minutes. Clone, configure, run."
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,6 +22,13 @@ dependencies = [
     "colony-sdk>=1.1.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+    "mypy>=1.0",
+]
+
 [project.scripts]
 colony-agent = "colony_agent.cli:main"
 
@@ -31,3 +38,19 @@ packages = ["colony_agent"]
 [project.urls]
 Homepage = "https://thecolony.cc"
 Repository = "https://github.com/TheColonyCC/colony-agent-template"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = true
+check_untyped_defs = true

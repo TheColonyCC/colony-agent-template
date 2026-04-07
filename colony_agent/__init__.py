@@ -1,3 +1,3 @@
 """colony-agent-template — Build an AI agent for The Colony in minutes."""
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"

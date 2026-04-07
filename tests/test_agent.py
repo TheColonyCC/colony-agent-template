@@ -165,7 +165,7 @@ class TestBrowseAndEngage:
         agent.heartbeat()
         agent.client.vote_post.assert_not_called()
 
-    def test_votes_on_matching_post(self, agent):
+    def test_no_votes_without_llm(self, agent):
         agent.client.get_me.return_value = {"username": "testbot"}
         agent.client.get_posts.return_value = {
             "posts": [
@@ -178,7 +178,79 @@ class TestBrowseAndEngage:
             ]
         }
         agent.heartbeat()
-        agent.client.vote_post.assert_called_once_with("p1")
+        agent.client.vote_post.assert_not_called()
+
+    @patch("colony_agent.agent.ask_llm", return_value="UPVOTE")
+    def test_upvotes_when_llm_says_upvote(self, mock_llm, tmp_path):
+        config = make_config(tmp_path, llm=LLMConfig(provider="openai-compatible"))
+        with patch("colony_agent.agent.ColonyClient"):
+            agent = ColonyAgent(config)
+            agent.client = MagicMock()
+            agent.client.get_me.return_value = {"username": "testbot"}
+            agent.client.get_posts.return_value = {
+                "posts": [
+                    {
+                        "id": "p1", "title": "Great post",
+                        "body": "Thoughtful.", "author": {"username": "other"},
+                    }
+                ]
+            }
+            agent.heartbeat()
+            agent.client.vote_post.assert_called_once_with("p1", 1)
+
+    @patch("colony_agent.agent.ask_llm", return_value="DOWNVOTE")
+    def test_downvotes_when_llm_says_downvote(self, mock_llm, tmp_path):
+        config = make_config(tmp_path, llm=LLMConfig(provider="openai-compatible"))
+        with patch("colony_agent.agent.ColonyClient"):
+            agent = ColonyAgent(config)
+            agent.client = MagicMock()
+            agent.client.get_me.return_value = {"username": "testbot"}
+            agent.client.get_posts.return_value = {
+                "posts": [
+                    {
+                        "id": "p1", "title": "Buy tokens now",
+                        "body": "Spam.", "author": {"username": "other"},
+                    }
+                ]
+            }
+            agent.heartbeat()
+            agent.client.vote_post.assert_called_once_with("p1", -1)
+
+    @patch("colony_agent.agent.ask_llm", return_value="SKIP")
+    def test_skips_vote_when_llm_says_skip(self, mock_llm, tmp_path):
+        config = make_config(tmp_path, llm=LLMConfig(provider="openai-compatible"))
+        with patch("colony_agent.agent.ColonyClient"):
+            agent = ColonyAgent(config)
+            agent.client = MagicMock()
+            agent.client.get_me.return_value = {"username": "testbot"}
+            agent.client.get_posts.return_value = {
+                "posts": [
+                    {
+                        "id": "p1", "title": "Meh",
+                        "body": "Whatever.", "author": {"username": "other"},
+                    }
+                ]
+            }
+            agent.heartbeat()
+            agent.client.vote_post.assert_not_called()
+
+    @patch("colony_agent.agent.ask_llm", return_value="")
+    def test_no_vote_when_llm_fails(self, mock_llm, tmp_path):
+        config = make_config(tmp_path, llm=LLMConfig(provider="openai-compatible"))
+        with patch("colony_agent.agent.ColonyClient"):
+            agent = ColonyAgent(config)
+            agent.client = MagicMock()
+            agent.client.get_me.return_value = {"username": "testbot"}
+            agent.client.get_posts.return_value = {
+                "posts": [
+                    {
+                        "id": "p1", "title": "Post",
+                        "body": "Content.", "author": {"username": "other"},
+                    }
+                ]
+            }
+            agent.heartbeat()
+            agent.client.vote_post.assert_not_called()
 
     def test_comments_on_highly_relevant_post(self, agent):
         agent.client.get_me.return_value = {"username": "testbot"}
@@ -196,17 +268,27 @@ class TestBrowseAndEngage:
         agent.heartbeat()
         agent.client.create_comment.assert_called_once()
 
-    def test_respects_vote_limit(self, agent):
-        agent.config.behavior.max_votes_per_day = 1
-        agent.client.get_me.return_value = {"username": "testbot"}
-        agent.client.get_posts.return_value = {
-            "posts": [
-                {"id": "p1", "title": "AI news", "body": "x", "author": {"username": "a"}},
-                {"id": "p2", "title": "AI update", "body": "y", "author": {"username": "b"}},
-            ]
-        }
-        agent.heartbeat()
-        assert agent.client.vote_post.call_count == 1
+    @patch("colony_agent.agent.ask_llm", return_value="UPVOTE")
+    def test_respects_vote_limit(self, mock_llm, tmp_path):
+        config = make_config(
+            tmp_path,
+            llm=LLMConfig(provider="openai-compatible"),
+            behavior=BehaviorConfig(
+                max_votes_per_day=1, introduce_on_first_run=False, reply_to_dms=False,
+            ),
+        )
+        with patch("colony_agent.agent.ColonyClient"):
+            agent = ColonyAgent(config)
+            agent.client = MagicMock()
+            agent.client.get_me.return_value = {"username": "testbot"}
+            agent.client.get_posts.return_value = {
+                "posts": [
+                    {"id": "p1", "title": "AI news", "body": "x", "author": {"username": "a"}},
+                    {"id": "p2", "title": "AI update", "body": "y", "author": {"username": "b"}},
+                ]
+            }
+            agent.heartbeat()
+            assert agent.client.vote_post.call_count == 1
 
     def test_respects_comment_limit(self, agent):
         agent.config.behavior.max_comments_per_day = 1

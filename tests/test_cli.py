@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from colony_sdk.client import ColonyAPIError
 
-from colony_agent.cli import cmd_init, cmd_status
+from colony_agent.cli import cmd_init, cmd_status, cmd_test_llm
 
 
 def make_status_args(config_path: str):
@@ -236,3 +236,69 @@ class TestCmdInit:
         assert config["identity"]["bio"] == "An AI agent on The Colony."
         assert config["identity"]["personality"] == "Friendly, curious, and helpful."
         assert config["identity"]["interests"] == ["AI", "agents", "technology"]
+
+
+def make_test_llm_args(config_path: str, prompt: str | None = None):
+    """Create args for cmd_test_llm."""
+    args = MagicMock()
+    args.config = config_path
+    args.prompt = prompt
+    return args
+
+
+class TestCmdTestLLM:
+    @patch("colony_agent.llm.chat", return_value="Hello! I am TestBot, nice to meet you.")
+    def test_successful_connection(self, mock_chat, tmp_path, capsys):
+        config_path = write_config(tmp_path)
+        cmd_test_llm(make_test_llm_args(config_path))
+
+        output = capsys.readouterr().out
+        assert "Hello! I am TestBot" in output
+        assert "working" in output.lower()
+
+    @patch("colony_agent.llm.chat", return_value="")
+    def test_no_response_shows_troubleshooting(self, mock_chat, tmp_path, capsys):
+        config_path = write_config(tmp_path)
+        with pytest.raises(SystemExit):
+            cmd_test_llm(make_test_llm_args(config_path))
+
+        output = capsys.readouterr().out
+        assert "No response" in output
+        assert "localhost:11434" in output
+
+    @patch("colony_agent.llm.chat", return_value="Custom response.")
+    def test_custom_prompt(self, mock_chat, tmp_path, capsys):
+        config_path = write_config(tmp_path)
+        cmd_test_llm(make_test_llm_args(config_path, prompt="What is 2+2?"))
+
+        output = capsys.readouterr().out
+        assert "Custom response" in output
+        # Verify the custom prompt was sent
+        call_messages = mock_chat.call_args[0][1]
+        assert call_messages[-1]["content"] == "What is 2+2?"
+
+    @patch("colony_agent.llm.chat", return_value="Works!")
+    def test_shows_llm_config(self, mock_chat, tmp_path, capsys):
+        config_path = write_config(tmp_path)
+        cmd_test_llm(make_test_llm_args(config_path))
+
+        output = capsys.readouterr().out
+        assert "openai-compatible" in output
+        assert "qwen3:8b" in output or "localhost" in output
+
+    @patch("colony_agent.llm.chat", return_value="Response!")
+    def test_shows_response_time(self, mock_chat, tmp_path, capsys):
+        config_path = write_config(tmp_path)
+        cmd_test_llm(make_test_llm_args(config_path))
+
+        output = capsys.readouterr().out
+        assert "s)" in output  # e.g. "(0.1s)"
+
+    @patch("colony_agent.llm.chat", return_value="")
+    def test_warns_about_missing_api_key(self, mock_chat, tmp_path, capsys):
+        config_path = write_config(tmp_path)
+        with pytest.raises(SystemExit):
+            cmd_test_llm(make_test_llm_args(config_path))
+
+        output = capsys.readouterr().out
+        assert "API key" in output or "api_key" in output

@@ -269,6 +269,12 @@ class ColonyAgent:
                 # Present the post to the LLM and ask for a decision
                 title = post.get("title", "")
                 body_preview = post.get("body", "")[:500]
+
+                # Fetch existing comments so the LLM knows what's been said
+                comments_context = ""
+                if can_comment:
+                    comments_context = self._fetch_comments_context(post_id)
+
                 actions = []
                 if can_vote:
                     actions.append(
@@ -276,7 +282,8 @@ class ColonyAgent:
                     )
                 if can_comment:
                     actions.append(
-                        "COMMENT: write a substantive comment (2-4 sentences), "
+                        "COMMENT: write a substantive comment (2-4 sentences) "
+                        "that adds something new to the conversation, "
                         "or say SKIP if you have nothing meaningful to add"
                     )
 
@@ -284,9 +291,14 @@ class ColonyAgent:
                     f"You are browsing the '{colony_name}' colony. "
                     f"Here is a post by {author}:\n\n"
                     f"Title: {title}\n"
-                    f"Content: {body_preview}\n\n"
-                    f"Decide how to engage. Respond in this format:\n"
+                    f"Content: {body_preview}\n"
                 )
+                if comments_context:
+                    prompt += (
+                        f"\nExisting comments on this post:\n"
+                        f"{comments_context}\n"
+                    )
+                prompt += "\nDecide how to engage. Respond in this format:\n"
                 for action in actions:
                     prompt += f"- {action}\n"
 
@@ -335,6 +347,31 @@ class ColonyAgent:
                                 self.state.mark_commented(post_id)
                                 log.info(f"Commented on: {title[:60]}")
                                 time.sleep(API_DELAY)
+
+    def _fetch_comments_context(self, post_id: str, max_comments: int = 10) -> str:
+        """Fetch existing comments on a post and format them for context.
+
+        Returns a formatted string of recent comments, or empty string
+        if fetching fails or there are no comments.
+        """
+        result = retry_api_call(self.client.get_comments, post_id)
+        if result is None:
+            return ""
+
+        comments = result.get("comments", []) if isinstance(result, dict) else result
+        if not comments:
+            return ""
+
+        lines = []
+        for c in comments[:max_comments]:
+            c_author = c.get("author", {}).get("username", "unknown")
+            c_body = c.get("body", "")[:200]
+            lines.append(f"- {c_author}: {c_body}")
+
+        if len(comments) > max_comments:
+            lines.append(f"- ... and {len(comments) - max_comments} more comments")
+
+        return "\n".join(lines)
 
     def _extract_comment(self, response: str) -> str:
         """Extract the comment text from an LLM response.

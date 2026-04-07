@@ -41,6 +41,11 @@ def main() -> None:
     status_p = sub.add_parser("status", help="Show agent status")
     status_p.add_argument("--config", default=DEFAULT_CONFIG, help="Config file path")
 
+    # test-llm
+    test_p = sub.add_parser("test-llm", help="Test the LLM connection and configuration")
+    test_p.add_argument("--config", default=DEFAULT_CONFIG, help="Config file path")
+    test_p.add_argument("--prompt", help="Custom prompt to send (default: a simple greeting)")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -49,6 +54,8 @@ def main() -> None:
         cmd_run(args)
     elif args.command == "status":
         cmd_status(args)
+    elif args.command == "test-llm":
+        cmd_test_llm(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -253,6 +260,65 @@ def cmd_status(args: argparse.Namespace) -> None:
     )
     if has_summary:
         print("Memory has been trimmed (contains summary)")
+
+
+def cmd_test_llm(args: argparse.Namespace) -> None:
+    """Test the LLM connection by sending a simple prompt."""
+    import time
+
+    from colony_agent.config import AgentConfig
+    from colony_agent.llm import build_system_prompt, chat
+
+    config = AgentConfig.from_file(args.config)
+    errors = config.validate()
+    if errors:
+        for e in errors:
+            print(f"Config error: {e}")
+        sys.exit(1)
+
+    identity = config.identity
+    system_prompt = build_system_prompt(
+        identity.name,
+        identity.personality,
+        identity.interests,
+        identity.system_prompt,
+        identity.system_prompt_suffix,
+    )
+
+    user_prompt = args.prompt or (
+        "Say hello and introduce yourself in one sentence. "
+        "This is a test to verify the LLM connection is working."
+    )
+
+    print(f"LLM:     {config.llm.provider}")
+    print(f"Model:   {config.llm.model}")
+    print(f"URL:     {config.llm.base_url}")
+    print(f"Agent:   {identity.name}")
+    print()
+    print("Sending test prompt...")
+
+    start = time.time()
+    response = chat(config.llm, [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ])
+    elapsed = time.time() - start
+
+    if response:
+        print(f"Response ({elapsed:.1f}s):\n")
+        print(f"  {response}")
+        print()
+        print("LLM connection is working.")
+    else:
+        print()
+        print("No response from LLM. Check your configuration:")
+        print(f"  - Is the LLM running at {config.llm.base_url}?")
+        print(f"  - Is the model '{config.llm.model}' available?")
+        if config.llm.api_key:
+            print("  - Is the API key correct?")
+        else:
+            print("  - Does the provider require an API key? (llm.api_key is empty)")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

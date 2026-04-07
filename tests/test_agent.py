@@ -407,6 +407,87 @@ class TestBrowseAndEngage:
         agent.client.create_comment.assert_not_called()
 
 
+class TestBudgetDistribution:
+    @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: SKIP")
+    def test_distributes_votes_across_colonies(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            identity=IdentityConfig(
+                name="TestBot", interests=["AI"], colonies=["general", "findings", "questions"],
+            ),
+            behavior=BehaviorConfig(
+                max_votes_per_day=6, max_comments_per_day=0,
+                introduce_on_first_run=False, reply_to_dms=False,
+            ),
+        )
+        agent = make_agent(config)
+        agent.client.get_me.return_value = {"username": "testbot"}
+
+        # Each colony returns 4 posts — without budgeting, first colony
+        # would use all 6 votes and the others get nothing
+        def fake_get_posts(colony=None, limit=10):
+            return {"posts": [
+                {"id": f"{colony}-{i}", "title": f"Post {i}", "body": "x", "author": {"username": "other"}}
+                for i in range(4)
+            ]}
+        agent.client.get_posts.side_effect = fake_get_posts
+
+        agent.heartbeat()
+        # Should have voted on posts from multiple colonies, not just the first
+        voted_ids = [call[0][0] for call in agent.client.vote_post.call_args_list]
+        colonies_voted = {vid.split("-")[0] for vid in voted_ids}
+        assert len(colonies_voted) >= 2, f"Votes only went to: {colonies_voted}"
+
+    @patch("colony_agent.agent.chat", return_value="COMMENT: Great insight here.")
+    def test_distributes_comments_across_colonies(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            identity=IdentityConfig(
+                name="TestBot", interests=["AI"], colonies=["general", "findings"],
+            ),
+            behavior=BehaviorConfig(
+                max_votes_per_day=0, max_comments_per_day=4,
+                introduce_on_first_run=False, reply_to_dms=False,
+            ),
+        )
+        agent = make_agent(config)
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_comments.return_value = {"comments": []}
+
+        def fake_get_posts(colony=None, limit=10):
+            return {"posts": [
+                {"id": f"{colony}-{i}", "title": f"Post {i}", "body": "x", "author": {"username": "other"}}
+                for i in range(4)
+            ]}
+        agent.client.get_posts.side_effect = fake_get_posts
+
+        agent.heartbeat()
+        commented_ids = [call[0][0] for call in agent.client.create_comment.call_args_list]
+        colonies_commented = {cid.split("-")[0] for cid in commented_ids}
+        assert len(colonies_commented) == 2, f"Comments only went to: {colonies_commented}"
+
+    @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: SKIP")
+    def test_single_colony_gets_full_budget(self, mock_chat, tmp_path):
+        config = make_config(
+            tmp_path,
+            identity=IdentityConfig(
+                name="TestBot", interests=["AI"], colonies=["general"],
+            ),
+            behavior=BehaviorConfig(
+                max_votes_per_day=5, introduce_on_first_run=False, reply_to_dms=False,
+            ),
+        )
+        agent = make_agent(config)
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {"posts": [
+            {"id": f"p{i}", "title": f"Post {i}", "body": "x", "author": {"username": "other"}}
+            for i in range(10)
+        ]}
+
+        agent.heartbeat()
+        assert agent.client.vote_post.call_count == 5
+
+
 class TestDryRunSummary:
     @patch("colony_agent.agent.chat", return_value="VOTE: UPVOTE\nCOMMENT: Great insight.")
     def test_prints_summary(self, mock_chat, tmp_path, capsys):

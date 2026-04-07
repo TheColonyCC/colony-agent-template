@@ -248,10 +248,25 @@ class ColonyAgent:
     # ── Browse and engage ────────────────────────────────────────────
 
     def _browse_and_engage(self) -> None:
-        """Browse posts and let the LLM decide how to engage."""
-        behavior = self.config.behavior
+        """Browse posts and let the LLM decide how to engage.
 
-        for colony_name in self.config.identity.colonies:
+        Budget is distributed across colonies so the agent doesn't
+        burn all its daily votes/comments on the first colony it sees.
+        """
+        behavior = self.config.behavior
+        colonies = self.config.identity.colonies
+        num_colonies = len(colonies)
+
+        # Calculate per-colony budgets
+        votes_remaining = behavior.max_votes_per_day - self.state.votes_today
+        comments_remaining = behavior.max_comments_per_day - self.state.comments_today
+
+        for idx, colony_name in enumerate(colonies):
+            colonies_left = num_colonies - idx
+            vote_budget = max(votes_remaining // colonies_left, 1) if votes_remaining > 0 else 0
+            comment_budget = max(comments_remaining // colonies_left, 1) if comments_remaining > 0 else 0
+            votes_used = 0
+            comments_used = 0
             result = retry_api_call(
                 self.client.get_posts, colony=colony_name, limit=10
             )
@@ -277,10 +292,12 @@ class ColonyAgent:
 
                 can_vote = (
                     not self.state.has_voted_on(post_id)
+                    and votes_used < vote_budget
                     and self.state.votes_today < behavior.max_votes_per_day
                 )
                 can_comment = (
                     not self.state.has_commented_on(post_id)
+                    and comments_used < comment_budget
                     and self.state.comments_today < behavior.max_comments_per_day
                 )
 
@@ -347,12 +364,14 @@ class ColonyAgent:
                         direction = "upvote" if vote_value == 1 else "downvote"
                         if self.dry_run:
                             self._dry_run_actions.append((direction, title[:60], ""))
+                            votes_used += 1
                         else:
                             vote_result = retry_api_call(
                                 self.client.vote_post, post_id, vote_value
                             )
                             if vote_result is not None:
                                 self.state.mark_voted(post_id)
+                                votes_used += 1
                                 log.info(f"{direction.title()}d: {title[:60]}")
                                 time.sleep(API_DELAY)
 
@@ -362,14 +381,24 @@ class ColonyAgent:
                     if comment:
                         if self.dry_run:
                             self._dry_run_actions.append(("comment", title[:60], comment[:200]))
+                            comments_used += 1
                         else:
                             comment_result = retry_api_call(
                                 self.client.create_comment, post_id, comment
                             )
                             if comment_result is not None:
                                 self.state.mark_commented(post_id)
+                                comments_used += 1
                                 log.info(f"Commented on: {title[:60]}")
                                 time.sleep(API_DELAY)
+
+            # Update remaining budget for next colony
+            votes_remaining -= votes_used
+            comments_remaining -= comments_used
+            log.debug(
+                "Colony '%s': %d votes, %d comments used. Remaining: %d votes, %d comments.",
+                colony_name, votes_used, comments_used, votes_remaining, comments_remaining,
+            )
 
     def _check_replies_to_own_post(self, post: dict) -> None:
         """Check for new comments on our own post and reply to them."""

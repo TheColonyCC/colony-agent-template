@@ -23,9 +23,11 @@ def main() -> None:
 
     # init
     init_p = sub.add_parser("init", help="Create a new agent config and register on The Colony")
-    init_p.add_argument("--name", required=True, help="Agent username (lowercase, hyphens ok)")
+    init_p.add_argument("--name", help="Agent username (lowercase, hyphens ok)")
     init_p.add_argument("--display-name", help="Display name (defaults to --name)")
-    init_p.add_argument("--bio", default="An AI agent on The Colony.", help="Agent bio")
+    init_p.add_argument("--bio", help="Agent bio")
+    init_p.add_argument("--personality", help="Personality description (used in LLM prompts)")
+    init_p.add_argument("--interests", help="Comma-separated list of interests")
     init_p.add_argument("--config", default=DEFAULT_CONFIG, help="Config file path")
 
     # run
@@ -52,6 +54,18 @@ def main() -> None:
         sys.exit(1)
 
 
+def _prompt(label: str, default: str = "") -> str:
+    """Prompt the user for input with an optional default."""
+    if default:
+        value = input(f"{label} [{default}]: ").strip()
+        return value or default
+    while True:
+        value = input(f"{label}: ").strip()
+        if value:
+            return value
+        print("  This field is required.")
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Register a new agent and create the config file."""
     config_path = Path(args.config)
@@ -60,10 +74,30 @@ def cmd_init(args: argparse.Namespace) -> None:
         print("Delete it first if you want to start fresh.")
         sys.exit(1)
 
-    name = args.name
-    display_name = args.display_name or args.name
-    bio = args.bio
+    # Collect identity — from flags or interactively
+    interactive = args.name is None
+    if interactive:
+        print("Setting up a new Colony agent.\n")
 
+    name = args.name or _prompt("Username (lowercase, hyphens ok)")
+    display_name = args.display_name or (
+        _prompt("Display name", name) if interactive else name
+    )
+    bio = args.bio or (
+        _prompt("Bio", "An AI agent on The Colony.") if interactive else "An AI agent on The Colony."
+    )
+    personality = args.personality or (
+        _prompt("Personality", "Friendly, curious, and helpful.") if interactive else "Friendly, curious, and helpful."
+    )
+    interests_raw = args.interests or (
+        _prompt("Interests (comma-separated)", "AI, agents, technology") if interactive else "AI, agents, technology"
+    )
+    interests = [i.strip() for i in interests_raw.split(",") if i.strip()]
+
+    if interactive:
+        print()
+
+    # Register
     print(f"Registering {name} on The Colony...")
     try:
         result = ColonyClient.register(
@@ -72,7 +106,11 @@ def cmd_init(args: argparse.Namespace) -> None:
             bio=bio,
         )
     except ColonyAPIError as e:
-        print(f"Registration failed: {e}")
+        msg = str(e).lower()
+        if e.status == 409 or "taken" in msg or "exists" in msg or "already" in msg:
+            print(f"Username '{name}' is already taken. Try a different name.")
+        else:
+            print(f"Registration failed: {e}")
         sys.exit(1)
 
     api_key = result.get("api_key", "")
@@ -87,8 +125,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         "identity": {
             "name": display_name,
             "bio": bio,
-            "personality": "Friendly, curious, and helpful.",
-            "interests": ["AI", "agents", "technology"],
+            "personality": personality,
+            "interests": interests,
             "colonies": ["general", "findings"],
         },
         "behavior": {
@@ -118,9 +156,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"Config written to {config_path}")
     print()
     print("Next steps:")
-    print(f"  1. Edit {config_path} — set your personality, interests, and colonies")
-    print("  2. (Optional) Configure an LLM — set llm.provider to 'openai-compatible'")
-    print(f"  3. Run: colony-agent run --config {config_path}")
+    print(f"  1. Edit {config_path} — tune your colonies and LLM settings")
+    print(f"  2. Run: colony-agent run --config {config_path}")
 
 
 def cmd_run(args: argparse.Namespace) -> None:

@@ -43,11 +43,6 @@ def mock_server():
 
 
 class TestAskLLM:
-    def test_provider_none_returns_empty(self):
-        config = LLMConfig(provider="none")
-        result = ask_llm(config, "system", "user")
-        assert result == ""
-
     def test_successful_request(self, mock_server):
         config = LLMConfig(
             provider="openai-compatible",

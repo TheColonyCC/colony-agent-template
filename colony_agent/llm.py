@@ -1,4 +1,4 @@
-"""LLM integration — supports OpenAI-compatible APIs or rule-based fallback."""
+"""LLM integration — sends chat completions to OpenAI-compatible APIs."""
 
 from __future__ import annotations
 
@@ -18,9 +18,6 @@ def ask_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
     Works with: OpenAI, Anthropic (via proxy), Ollama, vLLM, LM Studio,
     Together, Groq, or any provider that speaks the OpenAI chat format.
     """
-    if config.provider == "none":
-        return ""
-
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     headers = {"Content-Type": "application/json"}
     if config.api_key:

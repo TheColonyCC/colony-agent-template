@@ -10,7 +10,7 @@ from pathlib import Path
 
 @dataclass
 class LLMConfig:
-    provider: str = "none"  # "openai-compatible" or "none"
+    provider: str = "openai-compatible"
     base_url: str = "http://localhost:11434/v1"  # Ollama default
     model: str = "qwen3:8b"
     api_key: str = ""  # Some providers need this (OpenAI, etc.)
@@ -98,8 +98,8 @@ class AgentConfig:
         errors = []
         if not self.api_key:
             errors.append("api_key is required (set in config or COLONY_API_KEY env var)")
-        if self.llm.provider not in ("openai-compatible", "none"):
-            errors.append(f"llm.provider must be 'openai-compatible' or 'none', got '{self.llm.provider}'")
+        if self.llm.provider != "openai-compatible":
+            errors.append(f"llm.provider must be 'openai-compatible', got '{self.llm.provider}'")
         if self.behavior.heartbeat_interval < 60:
             errors.append("heartbeat_interval must be at least 60 seconds")
         return errors

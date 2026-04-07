@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
+
+log = logging.getLogger("colony-agent")
+
+# Auto-prune if the agent has been offline longer than this
+STALE_THRESHOLD_DAYS = 7
 
 
 class AgentState:
@@ -33,6 +39,7 @@ class AgentState:
                 saved = json.load(f)
                 self._data.update(saved)
         self._reset_daily_counters_if_needed()
+        self._prune_if_stale()
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -113,7 +120,41 @@ class AgentState:
     def mark_heartbeat(self) -> None:
         self._data["last_heartbeat"] = time.time()
 
+    @property
+    def total_tracked(self) -> int:
+        """Total number of entries across all tracking dicts."""
+        return sum(
+            len(self._data.get(key, {}))
+            for key in ("seen_posts", "commented_on", "voted_on", "replied_comments")
+        )
+
     # ── Maintenance ──────────────────────────────────────────────────
+
+    def _prune_if_stale(self) -> None:
+        """Auto-prune if the agent has been offline for a while.
+
+        When an agent is stopped for days or weeks, it accumulates a
+        large state file full of stale post IDs. This cleans them up
+        on startup so the agent doesn't carry dead weight.
+        """
+        last = self._data.get("last_heartbeat", 0)
+        if not last:
+            return
+
+        offline_days = (time.time() - last) / 86400
+        if offline_days < STALE_THRESHOLD_DAYS:
+            return
+
+        before = self.total_tracked
+        if before == 0:
+            return
+
+        removed = self.prune(max_age_days=max(int(offline_days), STALE_THRESHOLD_DAYS))
+        if removed:
+            log.info(
+                "Agent was offline for %d days — pruned %d stale entries (%d remaining).",
+                int(offline_days), removed, self.total_tracked,
+            )
 
     def prune(self, max_age_days: int = 30) -> int:
         """Remove entries older than max_age_days. Returns count removed."""

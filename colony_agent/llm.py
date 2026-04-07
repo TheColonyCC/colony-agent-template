@@ -11,6 +11,23 @@ from colony_agent.config import LLMConfig
 
 log = logging.getLogger("colony-agent")
 
+# Phrases that indicate the context window was exceeded
+_CONTEXT_OVERFLOW_PHRASES = [
+    "context length",
+    "context window",
+    "token limit",
+    "maximum context",
+    "too many tokens",
+    "reduce the length",
+    "input too long",
+    "max_tokens",
+    "model's maximum",
+]
+
+
+class ContextOverflowError(Exception):
+    """Raised when the LLM rejects a request due to context length."""
+
 
 def chat(config: LLMConfig, messages: list[dict[str, str]]) -> str:
     """Send a chat completion with a full message history.
@@ -36,7 +53,12 @@ def chat(config: LLMConfig, messages: list[dict[str, str]]) -> str:
             data = json.loads(resp.read().decode())
             return data["choices"][0]["message"]["content"].strip()
     except HTTPError as e:
-        log.warning("LLM request failed (%s): %s", e.code, e.read().decode()[:200])
+        body = e.read().decode()[:500]
+        body_lower = body.lower()
+        if e.code == 400 and any(p in body_lower for p in _CONTEXT_OVERFLOW_PHRASES):
+            log.warning("Context overflow detected: %s", body[:200])
+            raise ContextOverflowError(body[:200]) from e
+        log.warning("LLM request failed (%s): %s", e.code, body[:200])
         return ""
     except (KeyError, IndexError) as e:
         log.warning("LLM returned unexpected response format: %s", e)

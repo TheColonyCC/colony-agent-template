@@ -6,6 +6,7 @@ import pytest
 
 from colony_agent.agent import ColonyAgent
 from colony_agent.config import AgentConfig, BehaviorConfig, IdentityConfig, LLMConfig
+from colony_agent.llm import ContextOverflowError
 
 
 def make_config(tmp_path, **overrides):
@@ -511,6 +512,58 @@ class TestMemoryTrimming:
         agent.heartbeat()
         # Memory should have been trimmed
         assert len(agent.memory) <= 10
+
+
+class TestContextOverflowRecovery:
+    @patch("colony_agent.agent.chat")
+    def test_converse_trims_and_retries_on_overflow(self, mock_chat, agent):
+        # Fill memory so there's something to trim
+        for i in range(20):
+            agent.memory.add("user", f"Old message {i}")
+
+        # First call overflows, second (after trim) succeeds
+        mock_chat.side_effect = [
+            ContextOverflowError("context length exceeded"),
+            "Summary of old interactions.",  # trim summary call
+            "Response after trim.",  # retry of the original call
+        ]
+        result = agent._converse("New question")
+        assert result == "Response after trim."
+        assert mock_chat.call_count == 3
+
+    @patch("colony_agent.agent.chat")
+    def test_converse_reduces_memory_on_overflow(self, mock_chat, tmp_path):
+        config = make_config(tmp_path, max_memory_messages=10)
+        agent = make_agent(config)
+        for i in range(20):
+            agent.memory.add("user", f"Message {i}")
+
+        mock_chat.side_effect = [
+            ContextOverflowError("too many tokens"),
+            "Summary.",
+            "OK after trim.",
+        ]
+        agent._converse("Question")
+        # Old 20 messages should have been compacted (summary + recent half)
+        # plus the new question + response = well under 20
+        old_messages = [m for m in agent.memory.messages if m["content"].startswith("Message ")]
+        assert len(old_messages) <= 5  # kept at most half of max_messages
+
+    @patch("colony_agent.agent.chat")
+    def test_trim_handles_overflow_during_summary(self, mock_chat, agent):
+        for i in range(20):
+            agent.memory.add("user", f"Message {i}")
+
+        # Both the original call and the summary call overflow
+        mock_chat.side_effect = [
+            ContextOverflowError("context length exceeded"),
+            ContextOverflowError("still too long"),  # summary also overflows
+            "OK after fallback trim.",  # retry succeeds after hard trim
+        ]
+        result = agent._converse("Question")
+        assert result == "OK after fallback trim."
+        # Memory should have been hard-trimmed (kept recent half, no summary)
+        assert len(agent.memory) <= agent.memory.max_messages
 
 
 class TestRunOnce:

@@ -16,7 +16,7 @@ from colony_sdk import ColonyClient
 from colony_sdk.client import ColonyAPIError
 
 from colony_agent.config import AgentConfig
-from colony_agent.llm import build_system_prompt, chat
+from colony_agent.llm import ContextOverflowError, build_system_prompt, chat
 from colony_agent.memory import AgentMemory
 from colony_agent.retry import retry_api_call
 from colony_agent.state import AgentState
@@ -56,10 +56,21 @@ class ColonyAgent:
     # ── LLM conversation ────────────────────────────────────────────
 
     def _converse(self, user_message: str) -> str:
-        """Add a user message to memory, call the LLM, store the response."""
+        """Add a user message to memory, call the LLM, store the response.
+
+        If the context window is exceeded, trims memory and retries once.
+        """
         self.memory.add("user", user_message)
         messages = self.memory.get_messages_for_llm(self.system_prompt)
-        response = chat(self.config.llm, messages)
+
+        try:
+            response = chat(self.config.llm, messages)
+        except ContextOverflowError:
+            log.warning("Context overflow — trimming memory and retrying.")
+            self._trim_memory()
+            messages = self.memory.get_messages_for_llm(self.system_prompt)
+            response = chat(self.config.llm, messages)
+
         if response:
             self.memory.add("assistant", response)
         return response
@@ -421,7 +432,11 @@ class ColonyAgent:
                 ),
             },
         ]
-        summary = chat(self.config.llm, summary_messages)
+        try:
+            summary = chat(self.config.llm, summary_messages)
+        except ContextOverflowError:
+            summary = ""
+
         if summary:
             self.memory.trim(summary)
             log.info("Memory trimmed with LLM-generated summary.")

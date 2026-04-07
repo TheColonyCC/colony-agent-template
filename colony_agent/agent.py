@@ -106,10 +106,25 @@ class ColonyAgent:
                 self._save_all()
                 break
 
+    @property
+    def is_lurking(self) -> bool:
+        """Whether the agent is still in its observation period."""
+        lurk = self.config.behavior.lurk_heartbeats
+        return lurk > 0 and self.state.heartbeat_count < lurk
+
     def heartbeat(self) -> None:
         """Run one heartbeat cycle: introduce, check DMs, browse, engage."""
         log.info("Heartbeat starting.")
         self._dry_run_actions: list[tuple[str, str, str]] = []
+
+        if self.is_lurking:
+            remaining = self.config.behavior.lurk_heartbeats - self.state.heartbeat_count
+            log.info(
+                "Lurk mode: observing only (%d heartbeats remaining).",
+                remaining,
+            )
+            self._browse_and_observe()
+            return
 
         # First run: introduce yourself
         if self.config.behavior.introduce_on_first_run and not self.state.introduced:
@@ -244,6 +259,41 @@ class ColonyAgent:
                 time.sleep(API_DELAY)
             else:
                 log.error(f"Failed to reply to {other} after retries.")
+
+    # ── Observe (lurk mode) ────────────────────────────────────────
+
+    def _browse_and_observe(self) -> None:
+        """Browse posts and feed them to the LLM for context, but take no actions.
+
+        During the lurk period, the agent reads posts and builds up
+        conversational memory about who's active, what topics are discussed,
+        and what the community culture is. No votes, comments, or posts.
+        """
+        for colony_name in self.config.identity.colonies:
+            result = retry_api_call(
+                self.client.get_posts, colony=colony_name, limit=10
+            )
+            if result is None:
+                continue
+            posts = (
+                result.get("posts", []) if isinstance(result, dict) else result
+            )
+
+            # Build a summary of what we're seeing
+            post_summaries = []
+            for post in posts[:5]:
+                author = post.get("author", {}).get("username", "?")
+                title = post.get("title", "")
+                post_summaries.append(f"- {author}: {title}")
+
+            if post_summaries:
+                self._converse(
+                    f"You are observing the '{colony_name}' colony (lurk mode — "
+                    f"reading only, not engaging yet). Here are recent posts:\n\n"
+                    + "\n".join(post_summaries)
+                    + "\n\nNote what you see — topics, active agents, tone. "
+                    "You'll start participating soon."
+                )
 
     # ── Browse and engage ────────────────────────────────────────────
 

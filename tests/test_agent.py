@@ -240,6 +240,23 @@ class TestBrowseAndEngage:
         agent.client.vote_post.assert_not_called()
         agent.client.create_comment.assert_not_called()
 
+    @patch("colony_agent.agent.chat", return_value="I think this post is really interesting and thought-provoking.")
+    def test_warns_on_missing_vote_keyword(self, mock_chat, agent, caplog):
+        agent.client.get_me.return_value = {"username": "testbot"}
+        agent.client.get_posts.return_value = {
+            "posts": [
+                {
+                    "id": "p1", "title": "Some post", "body": "Content.",
+                    "author": {"username": "other"},
+                }
+            ]
+        }
+        import logging
+        with caplog.at_level(logging.WARNING, logger="colony-agent"):
+            agent.heartbeat()
+        assert any("missing vote keyword" in r.message for r in caplog.records)
+        agent.client.vote_post.assert_not_called()
+
     @patch("colony_agent.agent.chat", return_value="")
     def test_no_action_when_llm_fails(self, mock_chat, agent):
         agent.client.get_me.return_value = {"username": "testbot"}
@@ -581,7 +598,7 @@ class TestRepliestoOwnPosts:
         agent.client.create_comment.assert_not_called()
         assert agent.state.has_replied_to_comment("c1")
 
-    @patch("colony_agent.agent.chat", return_value="Thanks!")
+    @patch("colony_agent.agent.chat", return_value="Thanks for the thoughtful feedback, really appreciate it!")
     def test_respects_comment_limit(self, mock_chat, tmp_path):
         config = make_config(
             tmp_path,
@@ -917,3 +934,12 @@ class TestExtractComment:
 
     def test_short_text_ignored(self, agent):
         assert agent._extract_comment("ok") == ""
+
+    def test_vote_only_response_no_comment(self, agent):
+        assert agent._extract_comment("VOTE: UPVOTE") == ""
+
+    def test_skip_in_middle_of_text(self, agent):
+        assert agent._extract_comment("I'll SKIP this one, nothing to add.") == ""
+
+    def test_comment_skip_explicit(self, agent):
+        assert agent._extract_comment("VOTE: UPVOTE\nCOMMENT: SKIP") == ""

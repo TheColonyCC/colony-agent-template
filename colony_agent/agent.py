@@ -336,6 +336,12 @@ class ColonyAgent:
                         vote_value = 1
                     elif "DOWNVOTE" in response_upper:
                         vote_value = -1
+                    elif "SKIP" not in response_upper:
+                        log.warning(
+                            "LLM response missing vote keyword (UPVOTE/DOWNVOTE/SKIP) "
+                            "for '%s': %s",
+                            title[:40], response[:100],
+                        )
 
                     if vote_value != 0:
                         direction = "upvote" if vote_value == 1 else "downvote"
@@ -414,6 +420,14 @@ class ColonyAgent:
                 self.state.mark_replied_to_comment(comment_id)
                 continue
 
+            if len(reply.strip()) < 10:
+                log.warning(
+                    "LLM reply to %s too short to post (%d chars): '%s'",
+                    c_author, len(reply.strip()), reply.strip(),
+                )
+                self.state.mark_replied_to_comment(comment_id)
+                continue
+
             if self.dry_run:
                 self._dry_run_actions.append(("reply", f"{c_author} on '{title[:40]}'", reply[:200]))
                 continue
@@ -483,15 +497,36 @@ class ColonyAgent:
                 comment = stripped[8:].strip().lstrip("-").strip()
                 if comment and comment.upper() != "SKIP":
                     return comment
+                return ""  # Explicit SKIP after COMMENT:
+
+        # Check for explicit SKIP
+        upper = response.upper()
+        if "SKIP" in upper:
+            return ""
 
         # If no COMMENT: prefix, check if the whole response looks like a comment
         # (not just VOTE/SKIP keywords)
         clean = response.strip()
-        skip_words = {"UPVOTE", "DOWNVOTE", "SKIP", "VOTE:"}
+        skip_words = {"UPVOTE", "DOWNVOTE", "VOTE:"}
         if any(clean.upper().startswith(w) for w in skip_words):
+            # Response only has vote keywords, no comment content
+            log.debug(
+                "LLM response has no comment section: %s", response[:100],
+            )
             return ""
         if len(clean) > 20:  # Likely a real comment, not just a keyword
+            log.debug(
+                "LLM response used freeform format (no COMMENT: prefix): %s",
+                clean[:60],
+            )
             return clean
+
+        # Short, ambiguous response — not a valid comment
+        if clean:
+            log.warning(
+                "LLM response too short/ambiguous to use as comment: '%s'",
+                clean,
+            )
         return ""
 
     # ── Memory management ────────────────────────────────────────────

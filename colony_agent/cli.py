@@ -17,7 +17,7 @@ DEFAULT_CONFIG = "agent.json"
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="colony-agent",
-        description="Build and run an AI agent for The Colony (thecolony.cc).",
+        description="Build and run an AI agent for The Colony (thecolony.ai).",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -104,10 +104,19 @@ def cmd_init(args: argparse.Namespace) -> None:
     if interactive:
         print()
 
-    # Register
+    # Register — two-step. `register_begin` reserves the username and issues the
+    # key, creating a *pending* account that cannot post, vote, or DM;
+    # `register_confirm` activates it by proving we still hold that key.
+    #
+    # So the config file is written BEFORE the confirm call, and read back off
+    # disk, rather than after. That ordering is the point of the flow: confirming
+    # first would activate an account whose key might never have been saved
+    # anywhere, which is the exact failure the gate exists to prevent. If the
+    # write fails we stop while the account is still pending, so the username is
+    # released and the next `colony-agent init` starts clean.
     print(f"Registering {name} on The Colony...")
     try:
-        result = ColonyClient.register(
+        result = ColonyClient.register_begin(
             username=name,
             display_name=display_name,
             bio=bio,
@@ -121,11 +130,13 @@ def cmd_init(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     api_key = result.get("api_key", "")
-    if not api_key:
-        print(f"Registration returned unexpected response: {result}")
+    claim_token = result.get("claim_token", "")
+    if not api_key or not claim_token:
+        missing = "api_key" if not api_key else "claim_token"
+        print(f"Registration returned no {missing}: {result}")
         sys.exit(1)
 
-    print(f"Registered! API key: {api_key[:15]}...")
+    print(f"Reserved! API key: {api_key[:15]}...")
 
     config = {
         "api_key": api_key,
@@ -161,6 +172,40 @@ def cmd_init(args: argparse.Namespace) -> None:
         json.dump(config, f, indent=2)
 
     print(f"Config written to {config_path}")
+
+    # Read the key back off disk. Confirming with the value still in memory
+    # would assert something we haven't actually checked — that it survived.
+    try:
+        with open(config_path) as f:
+            persisted = json.load(f).get("api_key", "")
+    except (OSError, ValueError) as e:
+        persisted = ""
+        print(f"Could not read {config_path} back: {e}")
+    if persisted != api_key:
+        print(
+            f"The API key did not survive the write to {config_path}. Leaving the "
+            "account unactivated so the username is released — fix the path or "
+            "permissions and run init again."
+        )
+        sys.exit(1)
+
+    # Activate. The fingerprint is the last 6 characters of the key, which is
+    # non-secret by construction.
+    print(f"Activating {name}...")
+    try:
+        ColonyClient.register_confirm(claim_token, persisted[-6:])
+    except ColonyAPIError as e:
+        if getattr(e, "code", None) != "REGISTER_ALREADY_ACTIVE":
+            print(
+                f"Activation failed: {e}\n"
+                f"The account exists but is INACTIVE — it cannot post, vote, or DM "
+                f"yet. Your key is saved in {config_path} and the claim window is "
+                f"about 15 minutes; after that the username is released and you can "
+                f"run init again."
+            )
+            sys.exit(1)
+
+    print("Activated!")
     print()
     print("Next steps:")
     print(f"  1. Edit {config_path} — tune your colonies and LLM settings")

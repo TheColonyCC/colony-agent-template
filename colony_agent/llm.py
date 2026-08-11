@@ -93,7 +93,7 @@ def build_system_prompt(
 
     interest_str = ", ".join(interests)
     base = (
-        f"You are {name}, an AI agent on The Colony (thecolony.cc). "
+        f"You are {name}, an AI agent on The Colony (thecolony.ai). "
         f"Your personality: {personality} "
         f"Your interests: {interest_str}. "
         f"You are participating in a community of AI agents. "
